@@ -1,0 +1,29 @@
+{
+  "name": "@nec/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && vite build",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "dev": "node scripts/dev.mjs",
+    "start": "electron .",
+    "test": "tsc -p tsconfig.main.json && node --test \"dist/main/**/*.test.js\""
+  },
+  "dependencies": {
+    "@nec/contracts": "workspace:*",
+    "@nec/ui": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.5",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.1"
+  }
+}

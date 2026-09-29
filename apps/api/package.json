@@ -1,0 +1,42 @@
+{
+  "name": "@nec/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsc -p tsconfig.build.json && node --env-file=../../.env scripts/dev.mjs",
+    "start": "node --env-file-if-exists=../../.env dist/src/main.js",
+    "db:migrate": "tsc -p tsconfig.build.json && node --env-file=../../.env dist/src/database/cli.js migrate",
+    "db:seed": "tsc -p tsconfig.build.json && node --env-file=../../.env dist/src/database/cli.js seed",
+    "db:reset": "tsc -p tsconfig.build.json && node --env-file=../../.env dist/src/database/cli.js reset",
+    "test": "tsc -p tsconfig.json && node --env-file=../../.env --test --test-concurrency=1 \"dist/test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@nec/contracts": "workspace:*",
+    "@nestjs/common": "^12.1.0",
+    "@nestjs/core": "^12.1.0",
+    "jose": "^6.2.12",
+    "@nestjs/platform-express": "^12.1.0",
+    "@node-rs/argon2": "^2.2.1",
+    "helmet": "^8.3.0",
+    "kysely": "^0.29.6",
+    "nodemailer": "^10.0.11",
+    "otpauth": "^9.5.2",
+    "pg": "^8.23.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^12.1.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.0",
+    "typescript": "~6.0.3"
+  }
+}

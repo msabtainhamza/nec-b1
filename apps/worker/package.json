@@ -1,0 +1,24 @@
+{
+  "name": "@nec/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsc -p tsconfig.build.json && node --env-file=../../.env dist/src/main.js",
+    "start": "node --env-file-if-exists=../../.env dist/src/main.js",
+    "test": "tsc -p tsconfig.json && node --env-file=../../.env --test --test-concurrency=1 \"dist/test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@nec/contracts": "workspace:*",
+    "bullmq": "^6.3.9",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "~6.0.3"
+  }
+}
