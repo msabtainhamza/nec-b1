@@ -1,3 +1,4 @@
+import { customerCreditExposure } from '../sales/credit-exposure.js';
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import type {
@@ -98,92 +99,96 @@ export class BusinessPartnersService {
   }
 
   async create(principal: TenantPrincipal, input: CreatePartnerRequest, correlationId: string): Promise<BusinessPartner> {
-    return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId }, async (trx) => {
-      const currency = await this.validate(trx, principal.tenantId, input);
-      let created: { id: string };
-      try {
-        created = await trx
-          .insertInto('business_partners')
-          .values({
-            tenant_id: principal.tenantId,
-            code: input.code,
-            ...this.headerValues(input, currency),
-            created_by: principal.userId,
-          })
-          .returning('id')
-          .executeTakeFirstOrThrow();
-      } catch (error) {
-        if (isUniqueViolation(error, 'business_partners_tenant_id_code_key')) {
-          throw conflict(`A business partner with code ${input.code} already exists`);
-        }
-        throw error;
+    return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId }, (trx) => this.createWithin(trx, principal, input, correlationId));
+  }
+
+  async createWithin(trx: Trx, principal: TenantPrincipal, input: CreatePartnerRequest, correlationId: string): Promise<BusinessPartner> {
+    const currency = await this.validate(trx, principal.tenantId, input);
+    let created: { id: string };
+    try {
+      created = await trx
+        .insertInto('business_partners')
+        .values({
+          tenant_id: principal.tenantId,
+          code: input.code,
+          ...this.headerValues(input, currency),
+          created_by: principal.userId,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    } catch (error) {
+      if (isUniqueViolation(error, 'business_partners_tenant_id_code_key')) {
+        throw conflict(`A business partner with code ${input.code} already exists`);
       }
-      await this.replaceLines(trx, principal.tenantId, created.id, input);
-      const partner = await this.load(trx, principal.tenantId, created.id);
-      if (!partner) {
-        throw new Error('Created business partner could not be read back');
-      }
-      await this.audit.record(trx, {
-        tenantId: principal.tenantId,
-        actor: { type: 'user', id: principal.userId },
-        action: 'business_partner.created',
-        entityType: 'business_partner',
-        entityId: partner.id,
-        after: { code: partner.code, ...auditHeader(partner), contacts: partner.contacts.length, addresses: partner.addresses.length },
-        correlationId,
-      });
-      return partner;
+      throw error;
+    }
+    await this.replaceLines(trx, principal.tenantId, created.id, input);
+    const partner = await this.load(trx, principal.tenantId, created.id);
+    if (!partner) {
+      throw new Error('Created business partner could not be read back');
+    }
+    await this.audit.record(trx, {
+      tenantId: principal.tenantId,
+      actor: { type: 'user', id: principal.userId },
+      action: 'business_partner.created',
+      entityType: 'business_partner',
+      entityId: partner.id,
+      after: { code: partner.code, ...auditHeader(partner), contacts: partner.contacts.length, addresses: partner.addresses.length },
+      correlationId,
     });
+    return partner;
   }
 
   async update(principal: TenantPrincipal, partnerId: string, input: UpdatePartnerRequest, correlationId: string): Promise<BusinessPartner> {
-    return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId }, async (trx) => {
-      const current = await trx
-        .selectFrom('business_partners')
-        .select(['id', 'version', 'partner_type'])
-        .where('tenant_id', '=', principal.tenantId)
-        .where('id', '=', partnerId)
-        .forUpdate()
-        .executeTakeFirst();
-      if (!current) {
-        throw notFound();
-      }
-      if (current.version !== input.version) {
-        throw versionConflict();
-      }
-      assertTypeChange(current.partner_type, input.partnerType);
-      const before = await this.load(trx, principal.tenantId, partnerId);
-      const currency = await this.validate(trx, principal.tenantId, input);
-      await trx
-        .updateTable('business_partners')
-        .set({ ...this.headerValues(input, currency), version: current.version + 1, updated_at: new Date() })
-        .where('tenant_id', '=', principal.tenantId)
-        .where('id', '=', partnerId)
-        .execute();
-      await this.replaceLines(trx, principal.tenantId, partnerId, input);
-      const after = await this.load(trx, principal.tenantId, partnerId);
-      if (!before || !after) {
-        throw new Error('Business partner could not be read back');
-      }
-      await this.audit.record(trx, {
-        tenantId: principal.tenantId,
-        actor: { type: 'user', id: principal.userId },
-        action: 'business_partner.updated',
-        entityType: 'business_partner',
-        entityId: partnerId,
-        before: { ...auditHeader(before), contacts: before.contacts.length, addresses: before.addresses.length },
-        after: { ...auditHeader(after), contacts: after.contacts.length, addresses: after.addresses.length },
-        correlationId,
-      });
-      return after;
+    return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId, serializeCredit: true }, (trx) => this.updateWithin(trx, principal, partnerId, input, correlationId));
+  }
+
+  async updateWithin(trx: Trx, principal: TenantPrincipal, partnerId: string, input: UpdatePartnerRequest, correlationId: string): Promise<BusinessPartner> {
+    const current = await trx
+      .selectFrom('business_partners')
+      .select(['id', 'version', 'partner_type'])
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', partnerId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!current) {
+      throw notFound();
+    }
+    if (current.version !== input.version) {
+      throw versionConflict();
+    }
+    assertTypeChange(current.partner_type, input.partnerType);
+    const before = await this.load(trx, principal.tenantId, partnerId);
+    const currency = await this.validate(trx, principal.tenantId, input);
+    await trx
+      .updateTable('business_partners')
+      .set({ ...this.headerValues(input, currency), version: current.version + 1, updated_at: new Date() })
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', partnerId)
+      .execute();
+    await this.replaceLines(trx, principal.tenantId, partnerId, input);
+    const after = await this.load(trx, principal.tenantId, partnerId);
+    if (!before || !after) {
+      throw new Error('Business partner could not be read back');
+    }
+    await this.audit.record(trx, {
+      tenantId: principal.tenantId,
+      actor: { type: 'user', id: principal.userId },
+      action: 'business_partner.updated',
+      entityType: 'business_partner',
+      entityId: partnerId,
+      before: { ...auditHeader(before), contacts: before.contacts.length, addresses: before.addresses.length },
+      after: { ...auditHeader(after), contacts: after.contacts.length, addresses: after.addresses.length },
+      correlationId,
     });
+    return after;
   }
 
   async balance(principal: TenantPrincipal, partnerId: string): Promise<PartnerBalance> {
     return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId }, async (trx) => {
       const partner = await trx
         .selectFrom('business_partners')
-        .select(['id', 'partner_type', 'currency'])
+        .select(['id', 'partner_type', 'currency', 'credit_limit'])
         .where('tenant_id', '=', principal.tenantId)
         .where('id', '=', partnerId)
         .executeTakeFirst();
@@ -197,19 +202,35 @@ export class BusinessPartnersService {
         .where('tenant_id', '=', principal.tenantId)
         .where('partner_id', '=', partnerId)
         .executeTakeFirstOrThrow();
-      const open = await trx
-        .selectFrom('ap_invoices')
-        .select((eb) => eb.fn.countAll<string>().as('count'))
-        .where('tenant_id', '=', principal.tenantId)
-        .where('vendor_id', '=', partnerId)
-        .where('status', '=', 'posted')
-        .where('is_cancellation', '=', false)
-        .whereRef('paid_amount', '<', 'total')
-        .executeTakeFirstOrThrow();
+      const open =
+        partner.partner_type === 'customer'
+          ? await trx
+              .selectFrom('ar_invoices')
+              .select((eb) => eb.fn.countAll<string>().as('count'))
+              .where('tenant_id', '=', principal.tenantId)
+              .where('customer_id', '=', partnerId)
+              .where('status', '=', 'posted')
+              .where('is_cancellation', '=', false)
+              .whereRef('paid_amount', '<', 'total')
+              .executeTakeFirstOrThrow()
+          : await trx
+              .selectFrom('ap_invoices')
+              .select((eb) => eb.fn.countAll<string>().as('count'))
+              .where('tenant_id', '=', principal.tenantId)
+              .where('vendor_id', '=', partnerId)
+              .where('status', '=', 'posted')
+              .where('is_cancellation', '=', false)
+              .whereRef('paid_amount', '<', 'total')
+              .executeTakeFirstOrThrow();
       const debit = parseMoney(totals.debit);
       const credit = parseMoney(totals.credit);
       const balance = formatMoney(partner.partner_type === 'supplier' ? credit - debit : debit - credit);
-      return { partnerId, currency: partner.currency, balance, openInvoices: Number(open.count) };
+      let creditExposure: PartnerBalance['creditExposure'];
+      if (partner.partner_type === 'customer') {
+        const exposure = await customerCreditExposure(trx, principal.tenantId, partnerId);
+        creditExposure = { openOrders: exposure.openOrders, uninvoicedDeliveries: exposure.uninvoicedDeliveries, total: exposure.total, creditLimit: exposure.creditLimit, remaining: exposure.remaining };
+      }
+      return { partnerId, currency: partner.currency, balance, openInvoices: Number(open.count), ...(creditExposure ? { creditExposure } : {}) };
     });
   }
 
@@ -389,7 +410,7 @@ export class BusinessPartnersService {
     }
   }
 
-  private async load(trx: Trx, tenantId: string, partnerId: string): Promise<BusinessPartner | null> {
+  async load(trx: Trx, tenantId: string, partnerId: string): Promise<BusinessPartner | null> {
     const row = await trx
       .selectFrom('business_partners')
       .selectAll()

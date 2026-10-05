@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SessionUser, TenantSummary } from '@nec/contracts';
 import { Banner } from '@nec/ui';
 import { AcceptInvitationScreen } from './screens/AcceptInvitationScreen';
+import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { Shell } from './screens/Shell';
 import { TenantChooser } from './screens/TenantChooser';
@@ -9,6 +10,7 @@ import { TenantChooser } from './screens/TenantChooser';
 type View =
   | { kind: 'login'; notice?: string }
   | { kind: 'accept' }
+  | { kind: 'forgot' }
   | { kind: 'choose'; user: SessionUser; tenants: TenantSummary[] }
   | { kind: 'shell'; user: SessionUser; tenant: TenantSummary; tenants: TenantSummary[] };
 
@@ -37,7 +39,11 @@ export function App() {
           notice={view.notice}
           onSignedIn={(user, tenants) => setView({ kind: 'choose', user, tenants })}
           onAcceptInvitation={() => setView({ kind: 'accept' })}
+          onForgotPassword={() => setView({ kind: 'forgot' })}
         />
+      ) : null}
+      {view.kind === 'forgot' ? (
+        <ForgotPasswordScreen onDone={(message) => setView({ kind: 'login', notice: message })} onCancel={() => setView({ kind: 'login' })} />
       ) : null}
       {view.kind === 'accept' ? (
         <AcceptInvitationScreen

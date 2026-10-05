@@ -12,6 +12,8 @@ pg.types.setTypeParser(DATE_OID, (value: string) => value);
 export type Trx = Transaction<Database>;
 
 export interface DbContext {
+  serializeCredit?: boolean;
+  changeCreditPolicy?: boolean;
   tenantId?: string | null;
   userId?: string | null;
   invitationTokenHash?: string | null;
@@ -49,6 +51,12 @@ export class DatabaseService implements OnModuleDestroy {
   async withContext<T>(context: DbContext, fn: (trx: Trx) => Promise<T>): Promise<T> {
     return this.db.transaction().execute(async (trx) => {
       await applyContext(trx, context);
+      if (context.tenantId && context.changeCreditPolicy) await lockTenantResource(trx, context.tenantId, 'credit-policy');
+      else if (context.tenantId && context.serializeCredit) {
+        await sql`select pg_advisory_xact_lock_shared(hashtextextended(${`credit-policy:${context.tenantId}`}, 0))`.execute(trx);
+        const policy = await trx.selectFrom('sales_credit_settings').select('mode').where('tenant_id', '=', context.tenantId).executeTakeFirst();
+        if (policy && policy.mode !== 'disabled') await lockTenantResource(trx, context.tenantId, 'credit-exposure');
+      }
       return fn(trx);
     });
   }

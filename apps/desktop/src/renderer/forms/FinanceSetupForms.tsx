@@ -5,6 +5,7 @@ import {
   type AccountType,
   type GlDetermination,
   type NumberingSeries,
+  type PeriodCloseChecks,
   type PostingPeriod,
   type TrialBalance,
 } from '@nec/contracts';
@@ -369,8 +370,22 @@ export function GlDeterminationForm({ call, canAdminister, onClose }: { call: Ap
   );
 }
 
-export function PostingPeriodsForm({ call, canAdminister, onClose }: { call: ApiCall; canAdminister: boolean; onClose: () => void }) {
+export function PostingPeriodsForm({
+  call,
+  canAdminister,
+  canClose,
+  canReopen,
+  onClose,
+}: {
+  call: ApiCall;
+  canAdminister: boolean;
+  canClose: boolean;
+  canReopen: boolean;
+  onClose: () => void;
+}) {
   const [periods, setPeriods] = useState<PostingPeriod[]>([]);
+  const [closing, setClosing] = useState<{ period: PostingPeriod; checks: PeriodCloseChecks } | null>(null);
+  const [closeReason, setCloseReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [yearCode, setYearCode] = useState('');
@@ -387,17 +402,40 @@ export function PostingPeriodsForm({ call, canAdminister, onClose }: { call: Api
     void load();
   }, [load]);
 
-  const toggle = async (period: PostingPeriod) => {
-    const next = period.status === 'open' ? 'closed' : 'open';
-    const reason = window.prompt(`${next === 'closed' ? 'Close' : 'Reopen'} ${period.name}. Enter a reason:`);
-    if (!reason?.trim()) return;
+  const reviewClose = async (period: PostingPeriod) => {
     setError(null);
     setNotice(null);
-    const result = await call<PostingPeriod>('PATCH', `/v1/fin/periods/${period.id}/status`, { status: next, version: period.version, reason: reason.trim() });
+    setCloseReason('');
+    const result = await call<PeriodCloseChecks>('GET', `/v1/fin/periods/${period.id}/close-checks`);
+    if (result.ok) setClosing({ period, checks: result.body });
+    else setError(errorMessage(result));
+  };
+
+  const confirmClose = async () => {
+    if (!closing || busy || !closeReason.trim()) return;
+    setBusy(true);
+    setError(null);
+    const result = await call<PostingPeriod>('PATCH', `/v1/fin/periods/${closing.period.id}/status`, { status: 'closed', version: closing.period.version, reason: closeReason.trim() });
+    setBusy(false);
     if (!result.ok) {
       setError(errorMessage(result));
     } else {
-      setNotice(`${period.name} is now ${next}.`);
+      setNotice(`${closing.period.name} is now closed.`);
+      setClosing(null);
+    }
+    await load();
+  };
+
+  const reopen = async (period: PostingPeriod) => {
+    const reason = window.prompt(`Reopen ${period.name}. Enter a reason:`);
+    if (!reason?.trim()) return;
+    setError(null);
+    setNotice(null);
+    const result = await call<PostingPeriod>('PATCH', `/v1/fin/periods/${period.id}/status`, { status: 'open', version: period.version, reason: reason.trim() });
+    if (!result.ok) {
+      setError(errorMessage(result));
+    } else {
+      setNotice(`${period.name} is now open.`);
     }
     await load();
   };
@@ -448,14 +486,61 @@ export function PostingPeriodsForm({ call, canAdminister, onClose }: { call: Api
             key: 'action',
             header: '',
             render: (row) =>
-              canAdminister ? (
-                <Button type="button" onClick={() => void toggle(row)}>
-                  {row.status === 'open' ? 'Close' : 'Reopen'}
+              row.status === 'open' && canClose ? (
+                <Button type="button" onClick={() => void reviewClose(row)}>
+                  Close
+                </Button>
+              ) : row.status === 'closed' && canReopen ? (
+                <Button type="button" onClick={() => void reopen(row)}>
+                  Reopen
                 </Button>
               ) : null,
           },
         ]}
       />
+      {closing ? (
+        <div className="reverse-panel">
+          <div className="form-section">Close {closing.period.name}: Reconciliation Checks as of {closing.checks.endDate}</div>
+          <div className="ui-table-wrap">
+            <table className="ui-table" aria-label="Period close checks">
+              <thead>
+                <tr>
+                  <th>Check</th>
+                  <th>Result</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {closing.checks.checks.map((check) => (
+                  <tr key={check.key} className={check.passed ? undefined : 'row-warning'}>
+                    <td>{check.label}</td>
+                    <td>{check.passed ? 'Passed' : 'Failed'}</td>
+                    <td>{check.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {closing.checks.passed ? (
+            <div className="inline-fields">
+              <label className="ui-field">
+                <span>Reason</span>
+                <input className="grid-input" aria-label="Close reason" value={closeReason} maxLength={500} onChange={(e) => setCloseReason(e.target.value)} />
+              </label>
+              <Button type="button" variant="primary" busy={busy} disabled={!closeReason.trim()} onClick={() => void confirmClose()}>
+                Close Period
+              </Button>
+              <Button type="button" onClick={() => setClosing(null)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <p className="ui-muted">
+              Resolve the failed checks before closing, for example by reversing journal entries posted directly to control or inventory accounts. <Button type="button" onClick={() => setClosing(null)}>Cancel</Button>
+            </p>
+          )}
+        </div>
+      ) : null}
       {canAdminister ? (
         <form onSubmit={createYear} noValidate>
           <div className="form-section">New Fiscal Year</div>

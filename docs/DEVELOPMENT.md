@@ -93,6 +93,34 @@ pnpm run setup -- --skip-infra
 
 Redis, object storage and Mailpit are unavailable in this mode. The API still runs; invitation emails fail to send and are logged as `mail.failed`.
 
+### Recovering a refused database connection
+
+`ECONNREFUSED` from `/health` means the API could not connect to its configured PostgreSQL endpoint. Check `DB_HOST` and `POSTGRES_PORT` in `.env`; the ERP defaults to port 55432. A running Windows PostgreSQL service on port 5432 does not establish that the ERP cluster is available.
+
+For the native Windows installation, check readiness from PowerShell:
+
+```powershell
+& 'C:/Program Files/PostgreSQL/18/bin/pg_isready.exe' -h localhost -p 55432
+```
+
+For a stopped cluster, set `$erpDataDir` to its existing data directory, then check and start it using the matching PostgreSQL major version:
+
+```powershell
+$erpDataDir = 'C:/path/to/existing/pgdata'
+& 'C:/Program Files/PostgreSQL/18/bin/pg_ctl.exe' -D $erpDataDir status
+```
+
+Only if that cluster is stopped and the configured port is free:
+
+```powershell
+& 'C:/Program Files/PostgreSQL/18/bin/pg_ctl.exe' -D $erpDataDir -o '-p 55432 -c listen_addresses=localhost' -l "$erpDataDir.log" -w start
+Invoke-RestMethod http://127.0.0.1:4000/health
+```
+
+See the [PostgreSQL pg_ctl reference](https://www.postgresql.org/docs/18/app-pg-ctl.html) for status and startup behavior. Use `pnpm infra:up` for the Docker-managed cluster. Do not run `initdb`, `pnpm run setup` or `pnpm db:reset` to recover an existing database: setup resets the development schema. Retain the existing cluster and data. Scratch-directory clusters must be started again after a restart and can disappear during temporary-file cleanup; move development data to persistent storage through a planned backup and restore.
+
+`/health` returns 200 with `database: "ok"` after a successful database query, or 503 with `DATABASE_UNAVAILABLE` while that query fails. Restore connectivity, then retry; the API connection pool can reconnect without resetting data.
+
 ## API overview
 
 All routes are under `/v1` except `/health`. Errors use `{ "error": { "code", "message", "details?", "correlationId" } }`.

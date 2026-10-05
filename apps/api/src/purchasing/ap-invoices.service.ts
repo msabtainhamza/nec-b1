@@ -583,7 +583,25 @@ export class ApInvoicesService {
         const original = await this.loadOrThrow(trx, tenantId, invoiceId);
         if (original.isCancellation) throw conflict('A cancellation document cannot itself be cancelled');
         if (original.status === 'cancelled') throw conflict(`A/P invoice ${original.documentNumber} is already cancelled`);
-        if (parseMoney(original.paidAmount) > 0n) throw conflict('Payments are applied to this invoice; unallocate them first');
+        const paid = await trx.selectFrom('ap_invoices').select('paid_amount').where('tenant_id', '=', tenantId).where('id', '=', invoiceId).forUpdate().executeTakeFirstOrThrow();
+        if (parseMoney(paid.paid_amount) > 0n) {
+          const blocking = await trx
+            .selectFrom('payment_allocations as a')
+            .innerJoin('payments as p', (join) => join.onRef('p.id', '=', 'a.payment_id').onRef('p.tenant_id', '=', 'a.tenant_id'))
+            .select(['p.document_number', 'a.amount'])
+            .where('a.tenant_id', '=', tenantId)
+            .where('a.invoice_id', '=', invoiceId)
+            .where('a.event_type', '=', 'allocate')
+            .where(({ not, exists, selectFrom }) =>
+              not(exists(selectFrom('payment_allocations as u').select('u.id').whereRef('u.reverses_id', '=', 'a.id').whereRef('u.tenant_id', '=', 'a.tenant_id'))),
+            )
+            .orderBy('p.document_number')
+            .execute();
+          throw conflict(
+            `Payments are applied to this invoice (${blocking.map((row) => `${row.document_number}: ${formatMoney(parseMoney(row.amount))}`).join(', ')}); unallocate them first`,
+            { blockingPayments: blocking.map((row) => ({ documentNumber: row.document_number, amount: row.amount })) },
+          );
+        }
         if (payload.postingDate < original.postingDate) {
           throw new AppError(422, 'POSTING_REJECTED', 'The cancellation date cannot be earlier than the invoice date', [{ path: 'postingDate', message: 'Before the invoice date' }]);
         }
@@ -596,10 +614,7 @@ export class ApInvoicesService {
           .where('source_id', '=', invoiceId)
           .execute();
         await this.stock.lockValuations(trx, tenantId, movements.map((movement) => movement.item_id));
-        for (const movement of movements) {
-          const line = original.lines.find((candidate) => candidate.id === movement.source_line_id);
-          await this.stock.assertLatestMovement(trx, tenantId, movement.item_id, movement.id, line?.itemCode ?? movement.item_id);
-        }
+        await this.stock.assertDocumentIsLatest(trx, tenantId, movements, (itemId) => original.lines.find((line) => line.itemId === itemId)?.itemCode ?? itemId);
         const header = await trx
           .selectFrom('ap_invoices')
           .select(['series_id', 'vendor_id', 'branch_id', 'currency', 'subtotal', 'tax_total', 'total', 'vendor_reference', 'document_type'])

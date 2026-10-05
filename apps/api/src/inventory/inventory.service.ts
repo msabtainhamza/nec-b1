@@ -398,21 +398,23 @@ export class InventoryService {
   }
 
   async setPrices(principal: TenantPrincipal, listId: string, input: SetPricesRequest, correlationId: string): Promise<void> {
-    await this.run(principal, async (trx) => {
-      const list = await trx
-        .selectFrom('price_lists')
-        .select(['id', 'status'])
-        .where('tenant_id', '=', principal.tenantId)
-        .where('id', '=', listId)
-        .executeTakeFirst();
-      if (!list) throw notFound();
-      if (list.status !== 'active') throw conflict('Prices cannot be changed on an inactive price list');
-      const itemIds = [...new Set(input.prices.map((row) => row.itemId))];
-      const found = await trx.selectFrom('items').select('id').where('tenant_id', '=', principal.tenantId).where('id', 'in', itemIds).execute();
-      if (found.length !== itemIds.length) throw fieldError('prices', 'One or more items were not found');
-      await this.writePrices(trx, principal.tenantId, input.prices.map((row) => ({ priceListId: listId, itemId: row.itemId, price: row.price })));
-      await this.record(trx, principal, 'price_list.prices_changed', 'price_list', listId, correlationId, { changed: input.prices.length });
-    });
+    await this.run(principal, (trx) => this.setPricesWithin(trx, principal, listId, input, correlationId));
+  }
+
+  async setPricesWithin(trx: Trx, principal: TenantPrincipal, listId: string, input: SetPricesRequest, correlationId: string): Promise<void> {
+    const list = await trx
+      .selectFrom('price_lists')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', listId)
+      .executeTakeFirst();
+    if (!list) throw notFound();
+    if (list.status !== 'active') throw conflict('Prices cannot be changed on an inactive price list');
+    const itemIds = [...new Set(input.prices.map((row) => row.itemId))];
+    const found = await trx.selectFrom('items').select('id').where('tenant_id', '=', principal.tenantId).where('id', 'in', itemIds).execute();
+    if (found.length !== itemIds.length) throw fieldError('prices', 'One or more items were not found');
+    await this.writePrices(trx, principal.tenantId, input.prices.map((row) => ({ priceListId: listId, itemId: row.itemId, price: row.price })));
+    await this.record(trx, principal, 'price_list.prices_changed', 'price_list', listId, correlationId, { changed: input.prices.length });
   }
 
   private async writePrices(trx: Trx, tenantId: string, rows: { priceListId: string; itemId: string; price: string | null }[]): Promise<void> {
@@ -481,62 +483,66 @@ export class InventoryService {
   }
 
   async createItem(principal: TenantPrincipal, input: CreateItemRequest, correlationId: string): Promise<Item> {
-    return this.run(principal, async (trx) => {
-      await this.validateItem(trx, principal.tenantId, input);
-      let created: { id: string };
-      try {
-        created = await trx
-          .insertInto('items')
-          .values({ tenant_id: principal.tenantId, code: input.code, ...this.itemValues(input), created_by: principal.userId })
-          .returning('id')
-          .executeTakeFirstOrThrow();
-      } catch (error) {
-        this.mapItemConflict(error, input.code);
-        throw error;
-      }
-      await this.writePrices(trx, principal.tenantId, input.prices.map((row) => ({ ...row, itemId: created.id })));
-      const item = await this.loadItem(trx, principal.tenantId, created.id);
-      if (!item) throw new Error('Created item could not be read back');
-      await this.record(trx, principal, 'item.created', 'item', item.id, correlationId, this.auditItem(item));
-      return item;
-    });
+    return this.run(principal, (trx) => this.createItemWithin(trx, principal, input, correlationId));
+  }
+
+  async createItemWithin(trx: Trx, principal: TenantPrincipal, input: CreateItemRequest, correlationId: string): Promise<Item> {
+    await this.validateItem(trx, principal.tenantId, input);
+    let created: { id: string };
+    try {
+      created = await trx
+        .insertInto('items')
+        .values({ tenant_id: principal.tenantId, code: input.code, ...this.itemValues(input), created_by: principal.userId })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    } catch (error) {
+      this.mapItemConflict(error, input.code);
+      throw error;
+    }
+    await this.writePrices(trx, principal.tenantId, input.prices.map((row) => ({ ...row, itemId: created.id })));
+    const item = await this.loadItem(trx, principal.tenantId, created.id);
+    if (!item) throw new Error('Created item could not be read back');
+    await this.record(trx, principal, 'item.created', 'item', item.id, correlationId, this.auditItem(item));
+    return item;
   }
 
   async updateItem(principal: TenantPrincipal, itemId: string, input: UpdateItemRequest, correlationId: string): Promise<Item> {
-    return this.run(principal, async (trx) => {
-      const current = await trx
-        .selectFrom('items')
-        .select(['id', 'version', 'code', 'item_type', 'uom_id'])
+    return this.run(principal, (trx) => this.updateItemWithin(trx, principal, itemId, input, correlationId));
+  }
+
+  async updateItemWithin(trx: Trx, principal: TenantPrincipal, itemId: string, input: UpdateItemRequest, correlationId: string): Promise<Item> {
+    const current = await trx
+      .selectFrom('items')
+      .select(['id', 'version', 'code', 'item_type', 'uom_id'])
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', itemId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!current) throw notFound();
+    if (current.version !== input.version) throw versionConflict();
+    if ((current.item_type !== input.itemType || current.uom_id !== input.uomId) && (await this.stock.itemInUse(trx, principal.tenantId, itemId))) {
+      throw conflict(`Item ${current.code} is used in documents; its item type and unit of measure can no longer change`);
+    }
+    const before = await this.loadItem(trx, principal.tenantId, itemId);
+    await this.validateItem(trx, principal.tenantId, input);
+    try {
+      await trx
+        .updateTable('items')
+        .set({ ...this.itemValues(input), version: current.version + 1, updated_at: new Date() })
         .where('tenant_id', '=', principal.tenantId)
         .where('id', '=', itemId)
-        .forUpdate()
-        .executeTakeFirst();
-      if (!current) throw notFound();
-      if (current.version !== input.version) throw versionConflict();
-      if ((current.item_type !== input.itemType || current.uom_id !== input.uomId) && (await this.stock.itemInUse(trx, principal.tenantId, itemId))) {
-        throw conflict(`Item ${current.code} is used in documents; its item type and unit of measure can no longer change`);
-      }
-      const before = await this.loadItem(trx, principal.tenantId, itemId);
-      await this.validateItem(trx, principal.tenantId, input);
-      try {
-        await trx
-          .updateTable('items')
-          .set({ ...this.itemValues(input), version: current.version + 1, updated_at: new Date() })
-          .where('tenant_id', '=', principal.tenantId)
-          .where('id', '=', itemId)
-          .execute();
-      } catch (error) {
-        this.mapItemConflict(error, current.code);
-        throw error;
-      }
-      const listed = new Set(input.prices.map((row) => row.priceListId));
-      const removed = (before?.prices ?? []).filter((row) => !listed.has(row.priceListId)).map((row) => ({ priceListId: row.priceListId, itemId, price: null }));
-      await this.writePrices(trx, principal.tenantId, [...input.prices.map((row) => ({ ...row, itemId })), ...removed]);
-      const after = await this.loadItem(trx, principal.tenantId, itemId);
-      if (!before || !after) throw new Error('Item could not be read back');
-      await this.record(trx, principal, 'item.updated', 'item', itemId, correlationId, this.auditItem(after), this.auditItem(before));
-      return after;
-    });
+        .execute();
+    } catch (error) {
+      this.mapItemConflict(error, current.code);
+      throw error;
+    }
+    const listed = new Set(input.prices.map((row) => row.priceListId));
+    const removed = (before?.prices ?? []).filter((row) => !listed.has(row.priceListId)).map((row) => ({ priceListId: row.priceListId, itemId, price: null }));
+    await this.writePrices(trx, principal.tenantId, [...input.prices.map((row) => ({ ...row, itemId })), ...removed]);
+    const after = await this.loadItem(trx, principal.tenantId, itemId);
+    if (!before || !after) throw new Error('Item could not be read back');
+    await this.record(trx, principal, 'item.updated', 'item', itemId, correlationId, this.auditItem(after), this.auditItem(before));
+    return after;
   }
 
   private mapItemConflict(error: unknown, code: string): void {
@@ -617,7 +623,7 @@ export class InventoryService {
     }
   }
 
-  private async loadItem(trx: Trx, tenantId: string, itemId: string): Promise<Item | null> {
+  async loadItem(trx: Trx, tenantId: string, itemId: string): Promise<Item | null> {
     const row = await trx.selectFrom('items').selectAll().where('tenant_id', '=', tenantId).where('id', '=', itemId).executeTakeFirst();
     if (!row) return null;
     const prices = await trx

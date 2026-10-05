@@ -380,6 +380,7 @@ export const updatePurchasingSettingsRequest = z.object({
 export type UpdatePurchasingSettingsRequest = z.infer<typeof updatePurchasingSettingsRequest>;
 
 export interface PartnerBalance {
+  creditExposure?: { openOrders: string; uninvoicedDeliveries: string; total: string; creditLimit: string; remaining: string };
   partnerId: string;
   currency: string;
   balance: string;

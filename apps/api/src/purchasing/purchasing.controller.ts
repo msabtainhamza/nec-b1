@@ -4,6 +4,7 @@ import {
   cancelApInvoiceRequest,
   createApInvoiceRequest,
   updatePurchasingSettingsRequest,
+  type ApprovalSubmitted,
   type ApInvoice,
   type ApInvoiceSummary,
   type InvoiceableReceiptLine,
@@ -25,6 +26,7 @@ import { RequirePermission } from '../auth/auth.guard.js';
 import { parseInput } from '../common/errors.js';
 import { CorrelationId, CurrentPrincipal, tenantPrincipal, type Principal } from '../common/request-context.js';
 import { z } from 'zod';
+import { ApprovalsService } from '../approvals/approvals.service.js';
 import { ApInvoicesService } from './ap-invoices.service.js';
 import { GoodsReceiptsService } from './goods-receipts.service.js';
 import { PurchaseOrdersService } from './purchase-orders.service.js';
@@ -35,6 +37,7 @@ export class PurchasingController {
     private readonly orders: PurchaseOrdersService,
     private readonly receipts: GoodsReceiptsService,
     private readonly invoices: ApInvoicesService,
+    private readonly approvals: ApprovalsService,
   ) {}
 
   @RequirePermission('pur.invoice.view')
@@ -116,8 +119,14 @@ export class PurchasingController {
     @Body() body: unknown,
     @CorrelationId() correlationId: string,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<PurchaseOrder> {
-    const result = await this.orders.create(tenantPrincipal(principal), parseInput(createPurchaseOrderRequest, body), correlationId);
+  ): Promise<PurchaseOrder | ApprovalSubmitted> {
+    const input = parseInput(createPurchaseOrderRequest, body);
+    const submitted = await this.approvals.submitIfRequired(tenantPrincipal(principal), 'purchase_order', input, correlationId);
+    if (submitted) {
+      response.status(202);
+      return { approvalRequired: true, request: submitted };
+    }
+    const result = await this.orders.create(tenantPrincipal(principal), input, correlationId);
     response.status(result.replayed ? 200 : 201);
     response.setHeader('idempotent-replayed', String(result.replayed));
     return result.order;

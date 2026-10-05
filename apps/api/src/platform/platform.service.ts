@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
-import * as OTPAuth from 'otpauth';
 import {
   OWNER_ROLE_CODE,
   SYSTEM_ROLES,
@@ -13,14 +12,14 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { verifyPassword } from '../auth/crypto.js';
 import { LoginLimiter } from '../auth/login-limiter.js';
+import { SecretBox } from '../auth/secret-box.js';
 import { SessionService } from '../auth/session.service.js';
 import { TokenService } from '../auth/token.service.js';
+import { validateTotp } from '../auth/totp.js';
 import { conflict, isUniqueViolation, notFound, unauthenticated, versionConflict } from '../common/errors.js';
 import type { OperatorPrincipal } from '../common/request-context.js';
 import { applyContext, DatabaseService } from '../database/database.service.js';
 import { InvitationsService, type PendingInvitationMail } from '../tenancy/invitations.service.js';
-
-const TOTP_PERIOD_SECONDS = 30;
 
 export interface PlatformTenant {
   id: string;
@@ -42,6 +41,7 @@ export class PlatformService {
     private readonly limiter: LoginLimiter,
     private readonly audit: AuditService,
     private readonly invitations: InvitationsService,
+    private readonly secrets: SecretBox,
   ) {}
 
   async login(input: OperatorLoginRequest, userAgent: string | null): Promise<OperatorLoginResponse> {
@@ -64,7 +64,7 @@ export class PlatformService {
         .where('id', '=', operator.id)
         .forUpdate()
         .executeTakeFirstOrThrow();
-      const counter = validateTotp(locked.totp_secret, input.totp);
+      const counter = validateTotp(this.secrets.decrypt(locked.totp_secret), input.totp);
       const lastCounter = locked.totp_last_counter === null ? -1 : Number(locked.totp_last_counter);
       if (counter === null || counter <= lastCounter) {
         await this.audit.recordPlatform(trx, {
@@ -77,7 +77,11 @@ export class PlatformService {
         });
         return null;
       }
-      await trx.updateTable('platform_operators').set({ totp_last_counter: counter }).where('id', '=', operator.id).execute();
+      await trx
+        .updateTable('platform_operators')
+        .set({ totp_last_counter: counter, ...(this.secrets.isEncrypted(locked.totp_secret) ? {} : { totp_secret: this.secrets.encrypt(locked.totp_secret) }) })
+        .where('id', '=', operator.id)
+        .execute();
       const session = await this.sessions.create(trx, { type: 'operator', operatorId: operator.id }, userAgent);
       await this.audit.recordPlatform(trx, {
         operatorId: operator.id,
@@ -224,6 +228,11 @@ export class PlatformService {
         await sql`select seed_purchasing_defaults(${tenant.id}::uuid)`.execute(trx);
         await sql`select seed_ap_defaults(${tenant.id}::uuid)`.execute(trx);
         await sql`select seed_tax_defaults(${tenant.id}::uuid)`.execute(trx);
+        await sql`select seed_banking_defaults(${tenant.id}::uuid)`.execute(trx);
+        await sql`select seed_stock_transaction_defaults(${tenant.id}::uuid)`.execute(trx);
+        await sql`select seed_opening_balance_defaults(${tenant.id}::uuid)`.execute(trx);
+        await sql`select seed_sales_defaults(${tenant.id}::uuid)`.execute(trx);
+        await sql`select seed_quotation_defaults(${tenant.id}::uuid)`.execute(trx);
         if (ownerRoleId === null) {
           throw new Error('System role definitions must include an owner role');
         }
@@ -310,18 +319,4 @@ export class PlatformService {
       });
     });
   }
-}
-
-function validateTotp(secret: string, token: string): number | null {
-  const totp = new OTPAuth.TOTP({
-    secret: OTPAuth.Secret.fromBase32(secret),
-    algorithm: 'SHA1',
-    digits: 6,
-    period: TOTP_PERIOD_SECONDS,
-  });
-  const delta = totp.validate({ token, window: 1 });
-  if (delta === null) {
-    return null;
-  }
-  return Math.floor(Date.now() / 1000 / TOTP_PERIOD_SECONDS) + delta;
 }

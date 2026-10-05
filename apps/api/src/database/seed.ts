@@ -135,7 +135,7 @@ async function seedCatalog(ownerDb: Kysely<Database>, values: z.infer<typeof see
         .values({
           code: plan.code,
           name: plan.name,
-          modules: ['admin', 'bp', 'fin', 'inv', 'pur'],
+          modules: ['admin', 'bp', 'fin', 'inv', 'pur', 'bank', 'sal'],
           max_active_seats: plan.maxActiveSeats,
           max_employees: plan.maxEmployees,
           max_branches: plan.maxBranches,

@@ -37,74 +37,7 @@ export class PurchaseOrdersService {
       if (existing) {
         return { replayed: true, order: await this.loadOrThrow(trx, principal.tenantId, existing) };
       }
-      if (payload.deliveryDate < payload.postingDate) {
-        throw new AppError(400, 'VALIDATION_FAILED', 'The delivery date cannot be before the posting date', [{ path: 'deliveryDate', message: 'Before posting date' }]);
-      }
-      const vendor = await trx
-        .selectFrom('business_partners')
-        .select(['id', 'partner_type', 'status'])
-        .where('tenant_id', '=', principal.tenantId)
-        .where('id', '=', payload.vendorId)
-        .executeTakeFirst();
-      if (!vendor || vendor.partner_type !== 'supplier' || vendor.status !== 'active') {
-        throw new AppError(400, 'VALIDATION_FAILED', 'Choose an active vendor', [{ path: 'vendorId', message: 'Choose an active vendor' }]);
-      }
-      const tenant = await trx.selectFrom('tenants').select(['default_branch_id', 'base_currency']).where('id', '=', principal.tenantId).executeTakeFirstOrThrow();
-      const branchId = payload.branchId ?? tenant.default_branch_id;
-      const branch = branchId
-        ? await trx.selectFrom('branches').select(['id', 'status', 'default_warehouse_id']).where('tenant_id', '=', principal.tenantId).where('id', '=', branchId).executeTakeFirst()
-        : undefined;
-      if (!branch || branch.status !== 'active') {
-        throw new AppError(400, 'VALIDATION_FAILED', 'Choose an active branch', [{ path: 'branchId', message: 'Choose an active branch' }]);
-      }
-      const itemIds = [...new Set(payload.lines.map((line) => line.itemId))];
-      const items = await trx
-        .selectFrom('items as i')
-        .innerJoin('units_of_measure as u', (join) => join.onRef('u.id', '=', 'i.uom_id').onRef('u.tenant_id', '=', 'i.tenant_id'))
-        .select(['i.id', 'i.code', 'i.name', 'i.item_type', 'i.is_purchase_item', 'i.status', 'i.uom_id', 'i.default_warehouse_id', 'u.decimals'])
-        .where('i.tenant_id', '=', principal.tenantId)
-        .where('i.id', 'in', itemIds)
-        .execute();
-      const warehouseIds = [
-        ...new Set(
-          [...payload.lines.map((line) => line.warehouseId), ...items.map((item) => item.default_warehouse_id), branch.default_warehouse_id].filter(
-            (id): id is string => Boolean(id),
-          ),
-        ),
-      ];
-      const warehouses = warehouseIds.length
-        ? await trx.selectFrom('warehouses').select(['id', 'status']).where('tenant_id', '=', principal.tenantId).where('id', 'in', warehouseIds).execute()
-        : [];
-      const lines = payload.lines.map((line, index) => {
-        const item = items.find((candidate) => candidate.id === line.itemId);
-        if (!item || item.status !== 'active') throw lineError(index, 'itemId', `Line ${index + 1}: choose an active item`);
-        if (!item.is_purchase_item) throw lineError(index, 'itemId', `Line ${index + 1}: ${item.code} is not a purchase item`);
-        if (decimalPlaces(line.quantity) > item.decimals) {
-          throw lineError(index, 'quantity', `Line ${index + 1}: ${item.code} allows ${item.decimals} decimal places`);
-        }
-        const quantity = parseMoney(line.quantity);
-        if (quantity <= 0n) throw lineError(index, 'quantity', `Line ${index + 1}: quantity must be greater than zero`);
-        let warehouseId: string | null = null;
-        if (item.item_type === 'inventory') {
-          warehouseId = line.warehouseId ?? item.default_warehouse_id ?? branch.default_warehouse_id ?? null;
-          const warehouse = warehouses.find((candidate) => candidate.id === warehouseId);
-          if (!warehouse || warehouse.status !== 'active') throw lineError(index, 'warehouseId', `Line ${index + 1}: choose an active warehouse for ${item.code}`);
-        } else if (line.warehouseId) {
-          throw lineError(index, 'warehouseId', `Line ${index + 1}: ${item.code} is not stocked and has no warehouse`);
-        }
-        const unitPrice = parseMoney(line.unitPrice);
-        const netPrice = applyDiscount(unitPrice, parseMoney(line.discountPercent));
-        return {
-          item,
-          description: line.description ?? item.name,
-          warehouseId,
-          quantity,
-          unitPrice,
-          discount: parseMoney(line.discountPercent),
-          netPrice,
-          lineTotal: multiplyMoney(quantity, netPrice),
-        };
-      });
+      const { vendor, tenant, branch, lines } = await this.prepare(trx, principal.tenantId, payload);
       const numbering = await this.posting.nextNumber(trx, principal.tenantId, 'purchase_order', payload.seriesId);
       const order = await trx
         .insertInto('purchase_orders')
@@ -157,6 +90,78 @@ export class PurchaseOrdersService {
       });
       return { replayed: false, order: created };
     });
+  }
+
+  async prepare(trx: Trx, tenantId: string, payload: Omit<CreatePurchaseOrderRequest, 'idempotencyKey'>) {
+    if (payload.deliveryDate < payload.postingDate) {
+      throw new AppError(400, 'VALIDATION_FAILED', 'The delivery date cannot be before the posting date', [{ path: 'deliveryDate', message: 'Before posting date' }]);
+    }
+    const vendor = await trx
+      .selectFrom('business_partners')
+      .select(['id', 'partner_type', 'status'])
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', payload.vendorId)
+      .executeTakeFirst();
+    if (!vendor || vendor.partner_type !== 'supplier' || vendor.status !== 'active') {
+      throw new AppError(400, 'VALIDATION_FAILED', 'Choose an active vendor', [{ path: 'vendorId', message: 'Choose an active vendor' }]);
+    }
+    const tenant = await trx.selectFrom('tenants').select(['default_branch_id', 'base_currency']).where('id', '=', tenantId).executeTakeFirstOrThrow();
+    const branchId = payload.branchId ?? tenant.default_branch_id;
+    const branch = branchId
+      ? await trx.selectFrom('branches').select(['id', 'status', 'default_warehouse_id']).where('tenant_id', '=', tenantId).where('id', '=', branchId).executeTakeFirst()
+      : undefined;
+    if (!branch || branch.status !== 'active') {
+      throw new AppError(400, 'VALIDATION_FAILED', 'Choose an active branch', [{ path: 'branchId', message: 'Choose an active branch' }]);
+    }
+    const itemIds = [...new Set(payload.lines.map((line) => line.itemId))];
+    const items = await trx
+      .selectFrom('items as i')
+      .innerJoin('units_of_measure as u', (join) => join.onRef('u.id', '=', 'i.uom_id').onRef('u.tenant_id', '=', 'i.tenant_id'))
+      .select(['i.id', 'i.code', 'i.name', 'i.item_type', 'i.is_purchase_item', 'i.status', 'i.uom_id', 'i.default_warehouse_id', 'u.decimals'])
+      .where('i.tenant_id', '=', tenantId)
+      .where('i.id', 'in', itemIds)
+      .execute();
+    const warehouseIds = [
+      ...new Set(
+        [...payload.lines.map((line) => line.warehouseId), ...items.map((item) => item.default_warehouse_id), branch.default_warehouse_id].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    ];
+    const warehouses = warehouseIds.length
+      ? await trx.selectFrom('warehouses').select(['id', 'status']).where('tenant_id', '=', tenantId).where('id', 'in', warehouseIds).execute()
+      : [];
+    const lines = payload.lines.map((line, index) => {
+      const item = items.find((candidate) => candidate.id === line.itemId);
+      if (!item || item.status !== 'active') throw lineError(index, 'itemId', `Line ${index + 1}: choose an active item`);
+      if (!item.is_purchase_item) throw lineError(index, 'itemId', `Line ${index + 1}: ${item.code} is not a purchase item`);
+      if (decimalPlaces(line.quantity) > item.decimals) {
+        throw lineError(index, 'quantity', `Line ${index + 1}: ${item.code} allows ${item.decimals} decimal places`);
+      }
+      const quantity = parseMoney(line.quantity);
+      if (quantity <= 0n) throw lineError(index, 'quantity', `Line ${index + 1}: quantity must be greater than zero`);
+      let warehouseId: string | null = null;
+      if (item.item_type === 'inventory') {
+        warehouseId = line.warehouseId ?? item.default_warehouse_id ?? branch.default_warehouse_id ?? null;
+        const warehouse = warehouses.find((candidate) => candidate.id === warehouseId);
+        if (!warehouse || warehouse.status !== 'active') throw lineError(index, 'warehouseId', `Line ${index + 1}: choose an active warehouse for ${item.code}`);
+      } else if (line.warehouseId) {
+        throw lineError(index, 'warehouseId', `Line ${index + 1}: ${item.code} is not stocked and has no warehouse`);
+      }
+      const unitPrice = parseMoney(line.unitPrice);
+      const netPrice = applyDiscount(unitPrice, parseMoney(line.discountPercent));
+      return {
+        item,
+        description: line.description ?? item.name,
+        warehouseId,
+        quantity,
+        unitPrice,
+        discount: parseMoney(line.discountPercent),
+        netPrice,
+        lineTotal: multiplyMoney(quantity, netPrice),
+      };
+    });
+    return { vendor, tenant, branch, lines };
   }
 
   async changeStatus(principal: TenantPrincipal, orderId: string, input: ChangeOrderStatusRequest, correlationId: string): Promise<PurchaseOrder> {

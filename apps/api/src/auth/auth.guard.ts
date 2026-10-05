@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ALWAYS_ENABLED_MODULES, ERROR_CODES, permissionModule, RESTRICTED_ACCESS_PERMISSION, type Permission } from '@nec/contracts';
+import { ALWAYS_ENABLED_MODULES, ERROR_CODES, PERMISSIONS, permissionModule, RESTRICTED_ACCESS_PERMISSION, type Permission } from '@nec/contracts';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service.js';
 import { AppError, forbidden, subscriptionRestricted, unauthenticated } from '../common/errors.js';
@@ -8,7 +8,7 @@ import type { Principal, RequestWithContext, UserPrincipal } from '../common/req
 import { DatabaseService } from '../database/database.service.js';
 import { TenantAccessService } from '../tenancy/tenant-access.service.js';
 import { SessionService } from './session.service.js';
-import { TokenService } from './token.service.js';
+import { TokenService, type AccessClaims } from './token.service.js';
 
 const ACCESS_KEY = 'nec:access';
 
@@ -25,6 +25,7 @@ export const RequirePermission = (...permissions: Permission[]) =>
 export const TenantScoped = () => RequirePermission();
 
 const READ_METHODS = new Set(['GET', 'HEAD']);
+const SUPPORT_PERMISSIONS = new Set<Permission>(PERMISSIONS.filter((permission) => permission.endsWith('.view')));
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -78,6 +79,8 @@ export class AuthGuard implements CanActivate {
   private async userPrincipal(token: string, rule: AccessRule, request: Request & RequestWithContext): Promise<UserPrincipal> {
     const claims = await this.tokens.verify(token, 'erp-app');
     if (!claims) {
+      const support = await this.tokens.verify(token, 'erp-support');
+      if (support) return this.supportPrincipal(support, rule, request);
       throw unauthenticated();
     }
     const session = await this.sessions.findActive(claims.sessionId, 'user');
@@ -156,6 +159,59 @@ export class AuthGuard implements CanActivate {
     }
     return principal;
   }
+
+  private async supportPrincipal(claims: AccessClaims, rule: AccessRule, request: Request & RequestWithContext): Promise<UserPrincipal> {
+    if (rule.kind !== 'tenant' || !claims.tenantId || !claims.grantId) throw supportDenied('Support access is limited to company data');
+    const session = await this.sessions.findActive(claims.sessionId, 'operator');
+    if (!session || session.operator_id !== claims.subject) throw unauthenticated();
+    const operator = await this.database.db.selectFrom('platform_operators').select(['id', 'email', 'display_name']).where('id', '=', claims.subject).where('status', '=', 'active').executeTakeFirst();
+    if (!operator) throw unauthenticated();
+    const tenantId = claims.tenantId;
+    const grantId = claims.grantId;
+    const grant = await this.database.withContext({ tenantId, userId: null }, (trx) =>
+      trx.selectFrom('support_grants').select('id').where('tenant_id', '=', tenantId).where('id', '=', grantId).where('revoked_at', 'is', null).where('expires_at', '>', new Date()).executeTakeFirst(),
+    );
+    if (!grant) throw supportDenied('The support access for this company expired or was revoked');
+    const entitlements = await this.database.db.selectFrom('tenant_entitlements').select('modules').where('tenant_id', '=', tenantId).executeTakeFirst();
+    const modules = new Set(entitlements?.modules ?? []);
+    const denial = !READ_METHODS.has(request.method)
+      ? supportDenied('Support access is read-only')
+      : rule.permissions.some((permission) => !SUPPORT_PERMISSIONS.has(permission))
+        ? supportDenied('Support access allows viewing data only')
+        : rule.permissions.map(permissionModule).some((module) => !(ALWAYS_ENABLED_MODULES as readonly string[]).includes(module) && !modules.has(module))
+          ? new AppError(403, ERROR_CODES.moduleNotEntitled, 'The company plan does not include this module')
+          : null;
+    await this.database.db.transaction().execute((trx) =>
+      this.audit.recordPlatform(trx, {
+        operatorId: operator.id,
+        action: 'support.request',
+        targetType: 'tenant',
+        targetId: tenantId,
+        tenantId,
+        outcome: denial ? 'denied' : 'success',
+        details: { grantId, method: request.method, path: request.route?.path ?? request.path },
+        correlationId: request.correlationId,
+      }),
+    );
+    if (denial) throw denial;
+    return {
+      kind: 'user',
+      userId: operator.id,
+      sessionId: session.id,
+      email: operator.email,
+      displayName: `Support: ${operator.display_name}`,
+      tenantId,
+      membershipId: grantId,
+      permissions: SUPPORT_PERMISSIONS,
+      modules,
+      accessMode: 'full',
+      supportGrantId: grantId,
+    };
+  }
+}
+
+function supportDenied(message: string): AppError {
+  return new AppError(403, 'SUPPORT_ACCESS_DENIED', message);
 }
 
 function bearerToken(request: Request): string | null {

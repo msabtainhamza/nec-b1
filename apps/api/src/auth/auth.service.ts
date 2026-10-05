@@ -2,17 +2,20 @@ import { Injectable } from '@nestjs/common';
 import type {
   LoginRequest,
   LoginResponse,
+  LoginResult,
+  MfaLoginRequest,
   SelectTenantResponse,
   SessionInfo,
   TokenPair,
 } from '@nec/contracts';
 import { AuditService } from '../audit/audit.service.js';
-import { notFound, unauthenticated } from '../common/errors.js';
+import { AppError, notFound, unauthenticated } from '../common/errors.js';
 import type { UserPrincipal } from '../common/request-context.js';
 import { DatabaseService } from '../database/database.service.js';
 import { TenantAccessService } from '../tenancy/tenant-access.service.js';
 import { verifyPassword } from './crypto.js';
 import { LoginLimiter } from './login-limiter.js';
+import { MfaService } from './mfa.service.js';
 import { SessionService } from './session.service.js';
 import { TokenService } from './token.service.js';
 
@@ -25,9 +28,10 @@ export class AuthService {
     private readonly tenantAccess: TenantAccessService,
     private readonly limiter: LoginLimiter,
     private readonly audit: AuditService,
+    private readonly mfa: MfaService,
   ) {}
 
-  async login(input: LoginRequest, userAgent: string | null): Promise<LoginResponse> {
+  async login(input: LoginRequest, userAgent: string | null): Promise<LoginResult> {
     const limiterKey = `user:${input.email}`;
     this.limiter.assertAllowed(limiterKey);
     const user = await this.database.db
@@ -41,6 +45,25 @@ export class AuthService {
       throw unauthenticated('The email or password is incorrect');
     }
     this.limiter.clear(limiterKey);
+    const challenge = await this.database.db.transaction().execute(async (trx) => ((await this.mfa.isEnabled(trx, user.id)) ? this.mfa.createChallenge(trx, user.id, userAgent) : null));
+    if (challenge) return { mfaRequired: true, challengeToken: challenge, challengeExpiresIn: this.mfa.challengeTtlSeconds };
+    return this.startSession(user, userAgent);
+  }
+
+  async completeMfaLogin(input: MfaLoginRequest, correlationId: string): Promise<LoginResponse> {
+    const limiterKey = `mfa:${input.challengeToken.slice(0, 16)}`;
+    this.limiter.assertAllowed(limiterKey);
+    const result = await this.mfa.consumeChallenge(input.challengeToken, input.code, correlationId);
+    if (!result) {
+      this.limiter.recordFailure(limiterKey);
+      throw unauthenticated('The verification code is incorrect or the sign-in attempt expired');
+    }
+    const user = await this.database.db.selectFrom('users').select(['id', 'email', 'display_name', 'status']).where('id', '=', result.userId).executeTakeFirstOrThrow();
+    if (user.status !== 'active') throw unauthenticated();
+    return this.startSession(user, result.userAgent);
+  }
+
+  private async startSession(user: { id: string; email: string; display_name: string }, userAgent: string | null): Promise<LoginResponse> {
     const { sessionId, refreshToken } = await this.database.db
       .transaction()
       .execute((trx) => this.sessions.create(trx, { type: 'user', userId: user.id }, userAgent));
@@ -75,6 +98,9 @@ export class AuthService {
       throw notFound('The company was not found or you do not have access to it');
     }
     await this.database.withContext({ tenantId, userId: principal.userId }, async (trx) => {
+      if (access.permissions.has('admin.user.administer') && (await this.mfa.loadSettings(trx, tenantId)).requireAdminMfa && !(await this.mfa.isEnabled(trx, principal.userId))) {
+        throw new AppError(403, 'MFA_REQUIRED', 'This company requires administrators to use two-factor authentication. Set it up under Two-Factor Authentication, then open the company again.');
+      }
       const updated = await trx
         .updateTable('sessions')
         .set({ active_tenant_id: tenantId, last_used_at: new Date() })

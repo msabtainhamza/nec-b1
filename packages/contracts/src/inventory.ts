@@ -199,3 +199,83 @@ export interface Item {
   updatedAt: string;
   prices: { priceListId: string; price: string }[];
 }
+
+export const inventoryStatusQuery = z.object({
+  warehouseId: z.uuid().optional(),
+  itemGroupId: z.uuid().optional(),
+  search: z.string().trim().max(100).optional(),
+  belowReorderPoint: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .optional(),
+});
+export type InventoryStatusQuery = z.infer<typeof inventoryStatusQuery>;
+
+export interface InventoryStatusWarehouse {
+  warehouseId: string;
+  warehouseCode: string;
+  onHand: string;
+  committed: string;
+  ordered: string;
+  available: string;
+}
+
+export interface InventoryStatusItem {
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  itemGroupCode: string;
+  uomCode: string;
+  reorderPoint: string | null;
+  onHand: string;
+  committed: string;
+  ordered: string;
+  available: string;
+  belowReorderPoint: boolean;
+  warehouses: InventoryStatusWarehouse[];
+}
+
+export interface InventoryStatusReport {
+  tenantName: string;
+  generatedAt: string;
+  items: InventoryStatusItem[];
+}
+
+export const inventoryValuationQuery = z.object({
+  asOf: isoDate,
+  warehouseId: z.uuid().optional(),
+  itemGroupId: z.uuid().optional(),
+});
+export type InventoryValuationQuery = z.infer<typeof inventoryValuationQuery>;
+
+export interface InventoryValuationRow {
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  warehouseCode: string;
+  accountCode: string;
+  quantity: string;
+  value: string;
+  averageCost: string;
+}
+
+export interface InventoryValuationAccount {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  stockValue: string;
+  ledgerBalance: string;
+  difference: string;
+}
+
+export interface InventoryValuationReport {
+  tenantName: string;
+  currency: string;
+  asOf: string;
+  generatedAt: string;
+  filtered: boolean;
+  rows: InventoryValuationRow[];
+  totalQuantity: string;
+  totalValue: string;
+  accounts: InventoryValuationAccount[];
+}

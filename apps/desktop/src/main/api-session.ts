@@ -2,6 +2,7 @@ import type {
   AcceptInvitationRequest,
   AcceptInvitationResponse,
   LoginResponse,
+  LoginResult,
   SelectTenantResponse,
   SessionUser,
   TenantSummary,
@@ -17,7 +18,7 @@ export interface ApiResult<T = unknown> {
 }
 
 const RENDERER_METHODS = new Set<HttpMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
-const RENDERER_PATH = /^\/v1\/(tenant|invitations|bp|fin|inv|pur)(\/[A-Za-z0-9._~-]+)*(\?[A-Za-z0-9=&._~%-]*)?$/;
+const RENDERER_PATH = /^\/v1\/(tenant|invitations|bp|fin|inv|pur|bank|sal)(\/[A-Za-z0-9._~-]+)*(\?[A-Za-z0-9=&._~%-]*)?$/;
 
 export function isAllowedRendererRequest(method: string, path: string): method is HttpMethod {
   return RENDERER_METHODS.has(method as HttpMethod) && RENDERER_PATH.test(path) && !path.includes('..');
@@ -27,6 +28,7 @@ export class ApiSession {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private refreshing: Promise<boolean> | null = null;
+  private challengeToken: string | null = null;
   user: SessionUser | null = null;
   tenant: TenantSummary | null = null;
 
@@ -35,16 +37,38 @@ export class ApiSession {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async login(email: string, password: string): Promise<ApiResult<{ user: SessionUser; tenants: TenantSummary[] } | unknown>> {
-    const result = await this.send<LoginResponse>('POST', '/v1/auth/login', { email, password }, null);
+  async login(email: string, password: string): Promise<ApiResult<{ user: SessionUser; tenants: TenantSummary[] } | { mfaRequired: true; expiresIn: number } | unknown>> {
+    this.challengeToken = null;
+    const result = await this.send<LoginResult>('POST', '/v1/auth/login', { email, password }, null);
     if (!result.ok) {
       return result;
     }
-    this.accessToken = result.body.accessToken;
-    this.refreshToken = result.body.refreshToken;
-    this.user = result.body.user;
+    if ('mfaRequired' in result.body) {
+      this.challengeToken = result.body.challengeToken;
+      return { ok: true, status: result.status, body: { mfaRequired: true, expiresIn: result.body.challengeExpiresIn } };
+    }
+    return this.signedIn(result.status, result.body);
+  }
+
+  async verifyMfa(code: string): Promise<ApiResult<{ user: SessionUser; tenants: TenantSummary[] } | unknown>> {
+    if (!this.challengeToken) return { ok: false, status: 401, body: { error: { code: 'UNAUTHENTICATED', message: 'Sign in again to continue' } } };
+    const result = await this.send<LoginResponse>('POST', '/v1/auth/login/mfa', { challengeToken: this.challengeToken, code }, null);
+    if (!result.ok) return result;
+    this.challengeToken = null;
+    return this.signedIn(result.status, result.body);
+  }
+
+  async mfa(action: 'status' | 'setup' | 'enable' | 'disable', body?: unknown): Promise<ApiResult> {
+    if (action === 'status') return this.authorized('GET', '/v1/auth/mfa');
+    return this.authorized('POST', `/v1/auth/mfa/${action}`, body ?? {});
+  }
+
+  private signedIn(status: number, body: LoginResponse): ApiResult<{ user: SessionUser; tenants: TenantSummary[] }> {
+    this.accessToken = body.accessToken;
+    this.refreshToken = body.refreshToken;
+    this.user = body.user;
     this.tenant = null;
-    return { ok: true, status: result.status, body: { user: result.body.user, tenants: result.body.tenants } };
+    return { ok: true, status, body: { user: body.user, tenants: body.tenants } };
   }
 
   async tenants(): Promise<ApiResult<TenantSummary[] | unknown>> {
@@ -64,6 +88,18 @@ export class ApiSession {
 
   async acceptInvitation(input: AcceptInvitationRequest): Promise<ApiResult<AcceptInvitationResponse | unknown>> {
     return this.send('POST', '/v1/invitations/accept', input, null);
+  }
+
+  async requestPasswordReset(email: string): Promise<ApiResult> {
+    return this.send('POST', '/v1/auth/password-reset/request', { email }, null);
+  }
+
+  async confirmPasswordReset(token: string, password: string): Promise<ApiResult> {
+    return this.send('POST', '/v1/auth/password-reset/confirm', { token, password }, null);
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<ApiResult> {
+    return this.authorized('POST', '/v1/auth/password', { currentPassword, newPassword });
   }
 
   async request(method: string, path: string, body?: unknown): Promise<ApiResult> {

@@ -413,8 +413,20 @@ body,
   background: rgba(40, 48, 58, 0.35);
 }
 
+.credit-dialog {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  max-width: calc(100vw - 32px);
+}
+
+.credit-dialog::backdrop {
+  background: rgba(40, 48, 58, 0.35);
+}
+
 .numeric,
-.ui-table th.numeric {
+.ui-table th.numeric,
+.ui-table td.numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -423,6 +435,81 @@ body,
   font-weight: 700;
   background: var(--chrome) !important;
   border-top: 1px solid var(--border);
+}
+
+.group-row td {
+  font-weight: 600;
+}
+
+.indent-cell {
+  padding-left: 28px !important;
+}
+
+.row-warning td {
+  background: var(--warning-soft);
+}
+
+.cockpit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.cockpit-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.cockpit-tile:hover,
+.cockpit-tile:focus-visible {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.cockpit-tile--warning {
+  background: var(--warning-soft);
+}
+
+.cockpit-tile__title {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.cockpit-tile__value {
+  font-size: 1.4em;
+}
+
+.cockpit-tile__detail {
+  font-size: 0.85em;
+}
+
+.cockpit-bars {
+  width: 40%;
+}
+
+.cockpit-bar {
+  display: block;
+  height: 6px;
+  margin: 2px 0;
+  min-width: 1px;
+}
+
+.cockpit-bar--sales {
+  background: var(--accent-strong);
+}
+
+.cockpit-bar--purchases {
+  background: var(--positive);
 }
 
 .balance-ok {

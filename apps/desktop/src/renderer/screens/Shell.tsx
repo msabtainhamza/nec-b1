@@ -5,9 +5,20 @@ import { errorMessage } from '../api';
 import type { ApiResult } from '../erp';
 import { AboutForm } from '../forms/AboutForm';
 import { AuditLogForm } from '../forms/AuditLogForm';
+import { PaymentForm } from '../forms/BankingForms';
+import { AgingForm } from '../forms/ReportForms';
 import { BranchesForm } from '../forms/BranchesForm';
 import { BusinessPartnerForm } from '../forms/BusinessPartnerForm';
+import { AuthorizationsForm } from '../forms/AuthorizationsForm';
+import { ApprovalsForm, ApprovalTemplatesForm } from '../forms/ApprovalForms';
+import { ChangePasswordForm } from '../forms/ChangePasswordForm';
+import { CockpitForm } from '../forms/CockpitForm';
+import { SupportAccessForm } from '../forms/SupportAccessForm';
 import { CompanyDetailsForm } from '../forms/CompanyDetailsForm';
+import { TwoFactorForm } from '../forms/TwoFactorForm';
+import { DataImportForm } from '../forms/DataImportForm';
+import { GeneralLedgerForm } from '../forms/GeneralLedgerForm';
+import { InventoryStatusForm, InventoryValuationForm } from '../forms/InventoryReportForms';
 import {
   ChartOfAccountsForm,
   DocumentNumberingForm,
@@ -16,10 +27,15 @@ import {
   TrialBalanceForm,
 } from '../forms/FinanceSetupForms';
 import { ItemGroupsForm, PriceListsForm, UnitsOfMeasureForm, WarehousesForm } from '../forms/InventorySetupForms';
+import { InventoryAdjustmentForm, InventoryTransferForm } from '../forms/InventoryTransactionForms';
 import { ItemMasterDataForm } from '../forms/ItemMasterDataForm';
+import { OpeningBalanceForm } from '../forms/OpeningBalanceForms';
 import { JournalEntryForm } from '../forms/JournalEntryForm';
 import { ApInvoiceForm } from '../forms/ApInvoiceForm';
 import { GoodsReceiptForm, PurchaseOrderForm } from '../forms/PurchasingForms';
+import { CreditSettingsForm } from '../forms/CreditControls';
+import { QuotationForm } from '../forms/QuotationForm';
+import { ArInvoiceForm, DeliveryForm, SalesOrderForm } from '../forms/SalesForms';
 import { DocumentSettingsForm, TaxCodesForm } from '../forms/SettingsForms';
 import { InventoryAuditForm } from '../forms/StockForms';
 import { UsersForm } from '../forms/UsersForm';
@@ -27,7 +43,7 @@ import { RecordToolbarContext, type RecordActions } from '../toolbar';
 
 export type ApiCall = <T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) => Promise<ApiResult<T>>;
 
-type FormId = 'company' | 'users' | 'branches' | 'audit' | 'about' | 'bp' | 'coa' | 'journal' | 'periods' | 'gldet' | 'trial' | 'numbering' | 'item' | 'pricelists' | 'warehouses' | 'units' | 'itemgroups' | 'po' | 'grpo' | 'invaudit' | 'apinv' | 'taxcodes' | 'docsettings';
+type FormId = 'company' | 'users' | 'branches' | 'audit' | 'about' | 'bp' | 'coa' | 'journal' | 'periods' | 'gldet' | 'trial' | 'numbering' | 'item' | 'pricelists' | 'warehouses' | 'units' | 'itemgroups' | 'po' | 'grpo' | 'invaudit' | 'invstatus' | 'dataimport' | 'generalledger' | 'changepassword' | 'twofactor' | 'authorizations' | 'supportaccess' | 'cockpit' | 'approvaltemplates' | 'approvals' | 'invvaluation' | 'apinv' | 'taxcodes' | 'docsettings' | 'outpay' | 'goodsreceipt' | 'goodsissue' | 'invtransfer' | 'apaging' | 'glopening' | 'bpopening' | 'invopening' | 'inpay' | 'araging' | 'creditsettings' | 'quotation' | 'so' | 'delivery' | 'arinv';
 
 const FORM_TITLES: Record<FormId, string> = {
   company: 'Company Details',
@@ -50,9 +66,35 @@ const FORM_TITLES: Record<FormId, string> = {
   po: 'Purchase Order',
   grpo: 'Goods Receipt PO',
   invaudit: 'Inventory Audit Report',
+  invstatus: 'Inventory Status',
+  dataimport: 'Data Import',
+  generalledger: 'General Ledger',
+  changepassword: 'Change Password',
+  twofactor: 'Two-Factor Authentication',
+  authorizations: 'Authorizations',
+  supportaccess: 'Support Access',
+  cockpit: 'Cockpit',
+  approvaltemplates: 'Approval Templates',
+  approvals: 'Approvals',
+  invvaluation: 'Inventory Valuation',
   apinv: 'A/P Invoice',
   taxcodes: 'Tax Codes - Setup',
   docsettings: 'Document Settings',
+  outpay: 'Outgoing Payments',
+  inpay: 'Incoming Payments',
+  goodsreceipt: 'Goods Receipt',
+  goodsissue: 'Goods Issue',
+  invtransfer: 'Inventory Transfer',
+  apaging: 'Vendor Liabilities Aging',
+  araging: 'Customer Receivables Aging',
+  creditsettings: 'Sales Credit Policy',
+  quotation: 'Sales Quotation',
+  so: 'Sales Order',
+  delivery: 'Delivery',
+  arinv: 'A/R Invoice',
+  glopening: 'G/L Accounts Opening Balance',
+  bpopening: 'Business Partners Opening Balance',
+  invopening: 'Inventory Opening Balance',
 };
 
 interface TreeNode {
@@ -60,6 +102,7 @@ interface TreeNode {
   label: string;
   form?: FormId;
   permission?: string;
+  anyPermission?: string[];
   module?: string;
   planned?: string;
   children?: TreeNode[];
@@ -76,8 +119,30 @@ const MENU_TREE: TreeNode[] = [
         children: [
           { id: 'company', label: 'Company Details', form: 'company' },
           { id: 'numbering', label: 'Document Numbering', form: 'numbering', permission: 'admin.numbering.view' },
+          { id: 'creditsettings', label: 'Sales Credit Policy', form: 'creditsettings', permission: 'sal.credit.view', module: 'sal' },
           { id: 'docsettings', label: 'Document Settings', form: 'docsettings', permission: 'pur.invoice.view', module: 'pur' },
+          {
+            id: 'opening-balances',
+            label: 'Opening Balances',
+            children: [
+              { id: 'glopening', label: 'G/L Accounts Opening Balance', form: 'glopening', permission: 'fin.journal.view', module: 'fin' },
+              { id: 'bpopening', label: 'Business Partners Opening Balance', form: 'bpopening', permission: 'fin.journal.view', module: 'fin' },
+            ],
+          },
         ],
+      },
+      {
+        id: 'approval-procedures',
+        label: 'Approval Procedures',
+        children: [
+          { id: 'approvaltemplates', label: 'Approval Templates', form: 'approvaltemplates', permission: 'admin.approval.view' },
+          { id: 'approvals', label: 'Approvals', form: 'approvals', permission: 'admin.approval.view' },
+        ],
+      },
+      {
+        id: 'data-import-export',
+        label: 'Data Import/Export',
+        children: [{ id: 'dataimport', label: 'Data Import', form: 'dataimport', anyPermission: ['bp.partner.create', 'inv.item.create', 'inv.price.administer'] }],
       },
       {
         id: 'setup',
@@ -88,6 +153,7 @@ const MENU_TREE: TreeNode[] = [
             label: 'General',
             children: [
               { id: 'users', label: 'Users', form: 'users', permission: 'admin.user.view' },
+              { id: 'authorizations', label: 'Authorizations', form: 'authorizations', permission: 'admin.role.view' },
               { id: 'branches', label: 'Branches', form: 'branches', permission: 'admin.branch.view' },
             ],
           },
@@ -107,7 +173,16 @@ const MENU_TREE: TreeNode[] = [
           },
         ],
       },
-      { id: 'utilities', label: 'Utilities', children: [{ id: 'audit', label: 'Audit Log', form: 'audit', permission: 'admin.audit.view' }] },
+      {
+        id: 'utilities',
+        label: 'Utilities',
+        children: [
+          { id: 'audit', label: 'Audit Log', form: 'audit', permission: 'admin.audit.view' },
+          { id: 'changepassword', label: 'Change Password', form: 'changepassword' },
+          { id: 'twofactor', label: 'Two-Factor Authentication', form: 'twofactor' },
+          { id: 'supportaccess', label: 'Support Access', form: 'supportaccess', permission: 'admin.user.view' },
+        ],
+      },
     ],
   },
   {
@@ -121,11 +196,37 @@ const MENU_TREE: TreeNode[] = [
       {
         id: 'fin-reports',
         label: 'Financial Reports',
-        children: [{ id: 'trial', label: 'Trial Balance', form: 'trial', permission: 'fin.report.view', module: 'fin' }],
+        children: [
+          {
+            id: 'accounting-reports',
+            label: 'Accounting',
+            children: [
+              { id: 'generalledger', label: 'General Ledger', form: 'generalledger', permission: 'fin.report.view', module: 'fin' },
+              { id: 'trial', label: 'Trial Balance', form: 'trial', permission: 'fin.report.view', module: 'fin' },
+            ],
+          },
+          {
+            id: 'aging',
+            label: 'Aging',
+            children: [
+              { id: 'araging', label: 'Customer Receivables Aging', form: 'araging', permission: 'fin.report.view', module: 'fin' },
+              { id: 'apaging', label: 'Vendor Liabilities Aging', form: 'apaging', permission: 'fin.report.view', module: 'fin' },
+            ],
+          },
+        ],
       },
     ],
   },
-  { id: 'sales', label: 'Sales - A/R', planned: 'Planned for milestone M4' },
+  {
+    id: 'sales',
+    label: 'Sales - A/R',
+    children: [
+      { id: 'quotation', label: 'Sales Quotation', form: 'quotation', permission: 'sal.quotation.view', module: 'sal' },
+      { id: 'so', label: 'Sales Order', form: 'so', permission: 'sal.order.view', module: 'sal' },
+      { id: 'delivery', label: 'Delivery', form: 'delivery', permission: 'sal.delivery.view', module: 'sal' },
+      { id: 'arinv', label: 'A/R Invoice', form: 'arinv', permission: 'sal.invoice.view', module: 'sal' },
+    ],
+  },
   {
     id: 'purchasing',
     label: 'Purchasing - A/P',
@@ -140,7 +241,14 @@ const MENU_TREE: TreeNode[] = [
     label: 'Business Partners',
     children: [{ id: 'bp-master', label: 'Business Partner Master Data', form: 'bp', permission: 'bp.partner.view', module: 'bp' }],
   },
-  { id: 'banking', label: 'Banking', planned: 'Planned for milestones M4-M5' },
+  {
+    id: 'banking',
+    label: 'Banking',
+    children: [
+      { id: 'inpay', label: 'Incoming Payments', form: 'inpay', permission: 'bank.payment.view', module: 'bank' },
+      { id: 'outpay', label: 'Outgoing Payments', form: 'outpay', permission: 'bank.payment.view', module: 'bank' },
+    ],
+  },
   {
     id: 'inventory',
     label: 'Inventory',
@@ -148,9 +256,23 @@ const MENU_TREE: TreeNode[] = [
       { id: 'item', label: 'Item Master Data', form: 'item', permission: 'inv.item.view', module: 'inv' },
       { id: 'pricelists', label: 'Price Lists', form: 'pricelists', permission: 'inv.price.view', module: 'inv' },
       {
+        id: 'inv-transactions',
+        label: 'Inventory Transactions',
+        children: [
+          { id: 'goodsreceipt', label: 'Goods Receipt', form: 'goodsreceipt', permission: 'inv.stock.view', module: 'inv' },
+          { id: 'goodsissue', label: 'Goods Issue', form: 'goodsissue', permission: 'inv.stock.view', module: 'inv' },
+          { id: 'invtransfer', label: 'Inventory Transfer', form: 'invtransfer', permission: 'inv.stock.view', module: 'inv' },
+          { id: 'invopening', label: 'Inventory Opening Balance', form: 'invopening', permission: 'inv.stock.view', module: 'inv' },
+        ],
+      },
+      {
         id: 'inv-reports',
         label: 'Inventory Reports',
-        children: [{ id: 'invaudit', label: 'Inventory Audit Report', form: 'invaudit', permission: 'inv.stock.view', module: 'inv' }],
+        children: [
+          { id: 'invstatus', label: 'Inventory Status', form: 'invstatus', permission: 'inv.stock.view', module: 'inv' },
+          { id: 'invvaluation', label: 'Inventory Valuation', form: 'invvaluation', permission: 'inv.stock.view', module: 'inv' },
+          { id: 'invaudit', label: 'Inventory Audit Report', form: 'invaudit', permission: 'inv.stock.view', module: 'inv' },
+        ],
       },
     ],
   },
@@ -176,10 +298,14 @@ export function Shell({
 }) {
   const [context, setContext] = useState<TenantContextResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openForms, setOpenForms] = useState<FormId[]>(['company']);
+  const [openForms, setOpenForms] = useState<FormId[]>(['cockpit']);
+  const [lowStockOnly, setLowStockOnly] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
   const [invoiceVendorId, setInvoiceVendorId] = useState<string | null>(null);
+  const [salesOrderId, setSalesOrderId] = useState<string | null>(null);
+  const [deliveryOrderId, setDeliveryOrderId] = useState<string | null>(null);
+  const [invoiceCustomerId, setInvoiceCustomerId] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['administration', 'system-init', 'setup', 'setup-general', 'utilities']));
 
@@ -259,7 +385,7 @@ export function Shell({
     nodes
       .map((node) => (node.children ? { ...node, children: visibleNodes(node.children) } : node))
       .filter((node) =>
-        node.form ? can(node.permission) && entitled(node.module) : node.planned !== undefined || (node.children?.length ?? 0) > 0,
+        node.form ? can(node.permission) && (!node.anyPermission || node.anyPermission.some((permission) => can(permission))) && entitled(node.module) : node.planned !== undefined || (node.children?.length ?? 0) > 0,
       );
 
   const renderTree = (nodes: TreeNode[], depth: number): ReactNode =>
@@ -298,7 +424,7 @@ export function Shell({
     const close = () => closeForm(form);
     switch (form) {
       case 'company':
-        return <CompanyDetailsForm context={context} onClose={close} />;
+        return <CompanyDetailsForm context={context} call={call} canViewProfile={can('admin.company.view')} canEditProfile={can('admin.company.edit')} canEditSecurity={can('admin.user.administer')} canExport={can('admin.tenant.export')} onClose={close} />;
       case 'branches':
         return <BranchesForm call={call} canCreate={can('admin.branch.create')} canEdit={can('admin.branch.edit')} onClose={close} />;
       case 'users':
@@ -328,7 +454,7 @@ export function Shell({
           />
         ) : null;
       case 'periods':
-        return <PostingPeriodsForm call={call} canAdminister={can('fin.period.administer')} onClose={close} />;
+        return <PostingPeriodsForm call={call} canAdminister={can('fin.period.administer')} canClose={can('fin.period.close')} canReopen={can('fin.period.reopen')} onClose={close} />;
       case 'gldet':
         return <GlDeterminationForm call={call} canAdminister={can('fin.setup.administer')} onClose={close} />;
       case 'trial':
@@ -395,12 +521,175 @@ export function Shell({
             }}
           />
         ) : null;
+      case 'creditsettings':
+        return <CreditSettingsForm call={call} canAdminister={can('sal.credit.administer')} onClose={close} />;
+      case 'quotation':
+        return <QuotationForm call={call} canCreate={can('sal.quotation.create')} canEdit={can('sal.quotation.edit')} canConvert={can('sal.quotation.edit') && can('sal.order.create')} onClose={close} onOrder={(id) => { setSalesOrderId(id); setRefreshKey((value) => value + 1); openForm('so'); }} />;
+      case 'so':
+        return context ? (
+          <SalesOrderForm
+            initialOrderId={salesOrderId}
+            call={call}
+            canCreate={can('sal.order.create')}
+            canEdit={can('sal.order.edit')}
+            canDeliver={can('sal.delivery.post')}
+            canInvoice={can('sal.invoice.post')}
+            currency={context.tenant.baseCurrency}
+            onCopyToDelivery={(orderId) => {
+              setDeliveryOrderId(orderId);
+              setRefreshKey((value) => value + 1);
+              openForm('delivery');
+            }}
+            onCopyToInvoice={(customerId) => {
+              setInvoiceCustomerId(customerId);
+              setRefreshKey((value) => value + 1);
+              openForm('arinv');
+            }}
+            onClose={close}
+          />
+        ) : null;
+      case 'delivery':
+        return (
+          <DeliveryForm
+            call={call}
+            canPost={can('sal.delivery.post')}
+            canCancel={can('sal.delivery.cancel')}
+            canInvoice={can('sal.invoice.post')}
+            initialOrderId={deliveryOrderId}
+            onCopyToInvoice={(customerId) => {
+              setInvoiceCustomerId(customerId);
+              setRefreshKey((value) => value + 1);
+              openForm('arinv');
+            }}
+            onClose={() => {
+              setDeliveryOrderId(null);
+              close();
+            }}
+          />
+        );
+      case 'arinv':
+        return context ? (
+          <ArInvoiceForm
+            call={call}
+            canPost={can('sal.invoice.post')}
+            canCancel={can('sal.invoice.cancel')}
+            canOverride={can('sal.invoice.override')}
+            currency={context.tenant.baseCurrency}
+            initialCustomerId={invoiceCustomerId}
+            onClose={() => {
+              setInvoiceCustomerId(null);
+              close();
+            }}
+          />
+        ) : null;
+      case 'goodsreceipt':
+      case 'goodsissue':
+        return context ? (
+          <InventoryAdjustmentForm
+            key={form}
+            call={call}
+            direction={form === 'goodsreceipt' ? 'receipt' : 'issue'}
+            canPost={can('inv.adjustment.post')}
+            canCancel={can('inv.adjustment.cancel')}
+            currency={context.tenant.baseCurrency}
+            onClose={close}
+          />
+        ) : null;
+      case 'invopening':
+        return context ? (
+          <InventoryAdjustmentForm
+            key={form}
+            call={call}
+            direction="opening"
+            canPost={can('inv.opening.post')}
+            canCancel={can('inv.opening.cancel')}
+            currency={context.tenant.baseCurrency}
+            onClose={close}
+          />
+        ) : null;
+      case 'glopening':
+      case 'bpopening':
+        return context ? (
+          <OpeningBalanceForm
+            key={form}
+            call={call}
+            kind={form === 'glopening' ? 'account' : 'partner'}
+            canPost={can('fin.opening.post')}
+            canCancel={can('fin.opening.cancel')}
+            currency={context.tenant.baseCurrency}
+            onClose={close}
+          />
+        ) : null;
+      case 'invtransfer':
+        return context ? (
+          <InventoryTransferForm call={call} canPost={can('inv.transfer.post')} canCancel={can('inv.transfer.cancel')} currency={context.tenant.baseCurrency} onClose={close} />
+        ) : null;
+      case 'apaging':
+      case 'araging':
+        return <AgingForm key={form} call={call} side={form === 'apaging' ? 'payables' : 'receivables'} onClose={close} />;
+      case 'outpay':
+      case 'inpay':
+        return context ? (
+          <PaymentForm
+            key={form}
+            call={call}
+            direction={form === 'outpay' ? 'outgoing' : 'incoming'}
+            canPost={can('bank.payment.post')}
+            canCancel={can('bank.payment.cancel')}
+            canUnallocate={can('bank.payment.unallocate')}
+            currency={context.tenant.baseCurrency}
+            onClose={close}
+          />
+        ) : null;
       case 'taxcodes':
         return <TaxCodesForm call={call} canAdminister={can('fin.setup.administer')} onClose={close} />;
       case 'docsettings':
-        return <DocumentSettingsForm call={call} canAdminister={can('pur.setup.administer')} onClose={close} />;
+        return <DocumentSettingsForm call={call} canAdminister={can('pur.setup.administer')} canViewSales={can('sal.invoice.view')} canAdministerSales={can('sal.setup.administer')} onClose={close} />;
       case 'invaudit':
         return <InventoryAuditForm call={call} onClose={close} />;
+      case 'approvaltemplates':
+        return <ApprovalTemplatesForm call={call} canAdminister={can('admin.approval.administer')} onClose={close} />;
+      case 'approvals':
+        return <ApprovalsForm call={call} onClose={close} />;
+      case 'cockpit':
+        return (
+          <CockpitForm
+            call={call}
+            onOpen={(target) => {
+              if (target === 'lowstock') {
+                setLowStockOnly(true);
+                openForm('invstatus');
+              } else openForm(target);
+            }}
+            onClose={close}
+          />
+        );
+      case 'supportaccess':
+        return <SupportAccessForm call={call} canAdminister={can('admin.user.administer')} onClose={close} />;
+      case 'authorizations':
+        return <AuthorizationsForm call={call} canAdminister={can('admin.role.administer')} held={new Set(context?.permissions ?? [])} onClose={close} />;
+      case 'twofactor':
+        return <TwoFactorForm onClose={close} />;
+      case 'changepassword':
+        return <ChangePasswordForm onClose={close} />;
+      case 'generalledger':
+        return <GeneralLedgerForm call={call} onClose={close} />;
+      case 'dataimport':
+        return <DataImportForm call={call} allowed={{ partner: can('bp.partner.create'), item: can('inv.item.create'), price: can('inv.price.administer') }} onClose={close} />;
+      case 'invstatus':
+        return (
+          <InventoryStatusForm
+            key={lowStockOnly ? 'low' : 'all'}
+            call={call}
+            initialBelowOnly={lowStockOnly}
+            onClose={() => {
+              setLowStockOnly(false);
+              close();
+            }}
+          />
+        );
+      case 'invvaluation':
+        return <InventoryValuationForm call={call} onClose={close} />;
       case 'bp':
         return context ? (
           <BusinessPartnerForm
@@ -430,6 +719,7 @@ export function Shell({
           {
             label: 'Window',
             items: [
+              { label: 'Cockpit', onSelect: () => openForm('cockpit') },
               ...openForms.map((form) => ({ label: FORM_TITLES[form], onSelect: () => openForm(form) })),
               { label: 'Close All', onSelect: () => setOpenForms([]), disabled: openForms.length === 0 },
             ],

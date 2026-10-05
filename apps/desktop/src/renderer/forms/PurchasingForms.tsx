@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import type {
+  ApprovalSubmitted,
   Branch,
   GoodsReceipt,
   GoodsReceiptSummary,
@@ -195,7 +196,7 @@ export function PurchaseOrderForm({
       return;
     }
     setBusy(true);
-    const result = await call<PurchaseOrder>('POST', '/v1/pur/orders', {
+    const result = await call<PurchaseOrder | ApprovalSubmitted>('POST', '/v1/pur/orders', {
       idempotencyKey,
       vendorId,
       branchId: branchId || undefined,
@@ -215,6 +216,11 @@ export function PurchaseOrderForm({
     if (!result.ok) {
       const details = fieldErrors(result);
       setError([errorMessage(result), ...Object.values(details).filter((message) => message !== errorMessage(result))].join(' '));
+      return;
+    }
+    if ('approvalRequired' in result.body) {
+      setNotice(`The purchase order (${result.body.request.total}) needs approval under template ${result.body.request.templateName}. Follow it under Administration > Approval Procedures > Approvals and add it once approved.`);
+      setIdempotencyKey(crypto.randomUUID());
       return;
     }
     setNotice(`Purchase order ${result.body.documentNumber} added.`);
@@ -901,7 +907,7 @@ export function GoodsReceiptForm({
   );
 }
 
-function DocumentChooser({
+export function DocumentChooser({
   title,
   headers,
   rows,

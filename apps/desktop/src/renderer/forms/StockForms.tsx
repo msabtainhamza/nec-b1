@@ -8,6 +8,16 @@ import type { ApiCall } from '../screens/Shell';
 const SOURCE_LABELS: Record<string, string> = {
   goods_receipt: 'Goods Receipt PO',
   goods_receipt_cancellation: 'Goods Receipt Cancellation',
+  ap_invoice: 'A/P Invoice',
+  ap_invoice_cancellation: 'A/P Invoice Cancellation',
+  stock_transfer: 'Inventory Transfer',
+  stock_transfer_cancellation: 'Inventory Transfer Cancellation',
+  inventory_adjustment: 'Goods Receipt / Issue',
+  inventory_adjustment_cancellation: 'Goods Receipt / Issue Cancellation',
+  inventory_opening_balance: 'Inventory Opening Balance',
+  delivery: 'Delivery',
+  delivery_cancellation: 'Delivery Cancellation',
+  inventory_opening_balance_cancellation: 'Inventory Opening Balance Cancellation',
 };
 
 function quantity(value: string): string {

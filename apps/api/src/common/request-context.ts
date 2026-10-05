@@ -14,6 +14,7 @@ export interface UserPrincipal {
   permissions: ReadonlySet<Permission>;
   modules: ReadonlySet<string>;
   accessMode: AccessMode | null;
+  supportGrantId?: string;
 }
 
 export interface TenantPrincipal extends UserPrincipal {

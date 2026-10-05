@@ -5,6 +5,8 @@ import {
   createPriceListRequest,
   createUnitRequest,
   createWarehouseRequest,
+  inventoryStatusQuery,
+  inventoryValuationQuery,
   itemListQuery,
   stockMovementQuery,
   paginationQuery,
@@ -12,6 +14,8 @@ import {
   updateItemRequest,
   updatePriceListRequest,
   updateWarehouseRequest,
+  type InventoryStatusReport,
+  type InventoryValuationReport,
   type Item,
   type ItemGroup,
   type ItemStock,
@@ -27,6 +31,7 @@ import { z } from 'zod';
 import { RequirePermission } from '../auth/auth.guard.js';
 import { parseInput } from '../common/errors.js';
 import { CorrelationId, CurrentPrincipal, tenantPrincipal, type Principal } from '../common/request-context.js';
+import { InventoryReportsService } from './inventory-reports.service.js';
 import { InventoryService } from './inventory.service.js';
 import { StockService } from './stock.service.js';
 
@@ -37,7 +42,20 @@ export class InventoryController {
   constructor(
     private readonly inventory: InventoryService,
     private readonly stock: StockService,
+    private readonly reports: InventoryReportsService,
   ) {}
+
+  @RequirePermission('inv.stock.view')
+  @Get('reports/inventory-status')
+  inventoryStatus(@CurrentPrincipal() principal: Principal, @Query() query: unknown): Promise<InventoryStatusReport> {
+    return this.reports.status(tenantPrincipal(principal), parseInput(inventoryStatusQuery, query));
+  }
+
+  @RequirePermission('inv.stock.view')
+  @Get('reports/inventory-valuation')
+  inventoryValuation(@CurrentPrincipal() principal: Principal, @Query() query: unknown): Promise<InventoryValuationReport> {
+    return this.reports.valuation(tenantPrincipal(principal), parseInput(inventoryValuationQuery, query));
+  }
 
   @RequirePermission('inv.stock.view')
   @Get('items/:id/stock')

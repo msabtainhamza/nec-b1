@@ -278,10 +278,7 @@ export class GoodsReceiptsService {
           .forUpdate()
           .executeTakeFirstOrThrow();
         await this.stock.lockValuations(trx, tenantId, movements.map((movement) => movement.item_id));
-        for (const movement of movements) {
-          const line = original.lines.find((candidate) => candidate.id === movement.source_line_id);
-          await this.stock.assertLatestMovement(trx, tenantId, movement.item_id, movement.id, line?.itemCode ?? movement.item_id);
-        }
+        await this.stock.assertDocumentIsLatest(trx, tenantId, movements, (itemId) => original.lines.find((line) => line.itemId === itemId)?.itemCode ?? itemId);
 
         const cancellationId = randomUUID();
         let journalId: string | null = null;

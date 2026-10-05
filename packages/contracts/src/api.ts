@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PERMISSIONS } from './permissions.js';
 import { SUBSCRIPTION_STATES } from './subscription.js';
 
 export const API_VERSION = 'v1';
@@ -237,3 +238,154 @@ export const ERROR_CODES = {
   versionConflict: 'VERSION_CONFLICT',
   internal: 'INTERNAL_ERROR',
 } as const;
+
+export const passwordResetRequest = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email()),
+});
+export type PasswordResetRequest = z.infer<typeof passwordResetRequest>;
+
+export const passwordResetConfirmRequest = z.object({
+  token: z.string().min(20).max(512),
+  password,
+});
+export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmRequest>;
+
+export const changePasswordRequest = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: password,
+});
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequest>;
+
+export interface MfaChallengeResponse {
+  mfaRequired: true;
+  challengeToken: string;
+  challengeExpiresIn: number;
+}
+
+export type LoginResult = LoginResponse | MfaChallengeResponse;
+
+export const mfaCode = z.string().trim().regex(/^(\d{6}|[a-z2-7]{4}-[a-z2-7]{4})$/i, 'Enter the 6-digit code or a recovery code');
+
+export const mfaLoginRequest = z.object({
+  challengeToken: z.string().min(20).max(512),
+  code: mfaCode,
+});
+export type MfaLoginRequest = z.infer<typeof mfaLoginRequest>;
+
+export interface MfaStatus {
+  enabled: boolean;
+  pending: boolean;
+  recoveryCodesRemaining: number;
+}
+
+export interface MfaSetupResponse {
+  secret: string;
+  uri: string;
+}
+
+export const mfaEnableRequest = z.object({ code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code from the authenticator app') });
+export type MfaEnableRequest = z.infer<typeof mfaEnableRequest>;
+
+export interface MfaEnableResponse {
+  recoveryCodes: string[];
+}
+
+export const mfaDisableRequest = z.object({
+  password: z.string().min(1).max(256),
+  code: mfaCode,
+});
+export type MfaDisableRequest = z.infer<typeof mfaDisableRequest>;
+
+export interface SecuritySettings {
+  requireAdminMfa: boolean;
+  version: number;
+}
+
+export const updateSecuritySettingsRequest = z.object({
+  requireAdminMfa: z.boolean(),
+  version: z.number().int().min(0),
+});
+export type UpdateSecuritySettingsRequest = z.infer<typeof updateSecuritySettingsRequest>;
+
+const rolePermissions = z
+  .array(z.enum(PERMISSIONS))
+  .min(1)
+  .max(PERMISSIONS.length)
+  .transform((values) => [...new Set(values)].sort());
+
+export const createRoleRequest = z.object({
+  code: z.string().trim().regex(/^[a-z][a-z0-9_-]{1,39}$/, 'Use 2-40 lower-case letters, digits, dash or underscore, starting with a letter'),
+  name: z.string().trim().min(1).max(80),
+  permissions: rolePermissions,
+});
+export type CreateRoleRequest = z.infer<typeof createRoleRequest>;
+
+export const updateRoleRequest = z.object({
+  name: z.string().trim().min(1).max(80),
+  permissions: rolePermissions,
+});
+export type UpdateRoleRequest = z.infer<typeof updateRoleRequest>;
+
+export const changeMemberRolesRequest = z.object({
+  roleIds: z.array(z.uuid()).min(1).max(20),
+  version: z.number().int().positive(),
+});
+export type ChangeMemberRolesRequest = z.infer<typeof changeMemberRolesRequest>;
+
+export const grantSupportAccessRequest = z.object({
+  hours: z.number().int().min(1).max(72),
+  reason: z.string().trim().min(1).max(500),
+});
+export type GrantSupportAccessRequest = z.infer<typeof grantSupportAccessRequest>;
+
+export interface SupportGrant {
+  id: string;
+  grantedBy: string;
+  reason: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  active: boolean;
+}
+
+export const supportSessionRequest = z.object({ reason: z.string().trim().min(1).max(500) });
+export type SupportSessionRequest = z.infer<typeof supportSessionRequest>;
+
+export interface SupportSessionResponse {
+  accessToken: string;
+  accessTokenExpiresIn: number;
+  grantId: string;
+  tenant: { tenantId: string; code: string; displayName: string };
+}
+
+export const deletionRequest = z.object({
+  confirmCode: z.string().trim().min(1).max(60),
+  reason: z.string().trim().min(1).max(500),
+});
+export type DeletionRequest = z.infer<typeof deletionRequest>;
+
+export const restoreTenantRequest = z.object({ reason: z.string().trim().min(1).max(500) });
+export type RestoreTenantRequest = z.infer<typeof restoreTenantRequest>;
+
+export interface DashboardCount {
+  count: number;
+  amount: string;
+}
+
+export interface DashboardPeriod {
+  month: string;
+  sales: string | null;
+  purchases: string | null;
+}
+
+export interface Dashboard {
+  currency: string;
+  asOf: string;
+  openSalesOrders: DashboardCount | null;
+  openPurchaseOrders: DashboardCount | null;
+  overdueReceivables: DashboardCount | null;
+  overduePayables: DashboardCount | null;
+  lowStockItems: number | null;
+  pendingApprovals: number | null;
+  periods: DashboardPeriod[];
+}

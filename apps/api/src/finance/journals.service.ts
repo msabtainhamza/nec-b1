@@ -28,7 +28,7 @@ export class JournalsService {
 
   async post(principal: TenantPrincipal, input: PostJournalRequest, correlationId: string): Promise<{ replayed: boolean; entry: JournalEntry }> {
     const { idempotencyKey, ...payload } = input;
-    return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId }, async (trx) => {
+    return this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId, serializeCredit: true }, async (trx) => {
       const existing = await claimIdempotencyKey(trx, principal.tenantId, idempotencyKey, 'journal.post', payload);
       if (existing) {
         return { replayed: true, entry: await this.loadOrThrow(trx, principal.tenantId, existing) };
@@ -74,7 +74,7 @@ export class JournalsService {
   ): Promise<{ replayed: boolean; entry: JournalEntry }> {
     const { idempotencyKey, ...payload } = input;
     try {
-      return await this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId }, async (trx) => {
+      return await this.database.withContext({ tenantId: principal.tenantId, userId: principal.userId, serializeCredit: true }, async (trx) => {
         const existing = await claimIdempotencyKey(trx, principal.tenantId, idempotencyKey, `journal.reverse:${journalId}`, payload);
         if (existing) {
           return { replayed: true, entry: await this.loadOrThrow(trx, principal.tenantId, existing) };

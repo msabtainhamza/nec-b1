@@ -96,7 +96,7 @@ export const changePeriodStatusRequest = z.object({
 });
 export type ChangePeriodStatusRequest = z.infer<typeof changePeriodStatusRequest>;
 
-export const DOCUMENT_TYPES = ['journal_entry', 'purchase_order', 'goods_receipt', 'ap_invoice'] as const;
+export const DOCUMENT_TYPES = ['journal_entry', 'purchase_order', 'goods_receipt', 'ap_invoice', 'outgoing_payment', 'incoming_payment', 'sales_quotation', 'sales_order', 'delivery', 'ar_invoice', 'stock_transfer', 'stock_receipt', 'stock_issue', 'opening_balance', 'stock_opening'] as const;
 
 export interface NumberingSeries {
   id: string;
@@ -231,4 +231,159 @@ export interface TrialBalance {
   basis: string;
   rows: TrialBalanceRow[];
   totals: { debit: string; credit: string; openingBalance: string; closingBalance: string };
+}
+
+export const AGING_BASES = ['due_date', 'posting_date'] as const;
+export type AgingBasis = (typeof AGING_BASES)[number];
+
+export const apAgingQuery = z.object({
+  asOf: isoDate,
+  basis: z.enum(AGING_BASES).default('due_date'),
+  vendorId: z.uuid().optional(),
+});
+export type ApAgingQuery = z.infer<typeof apAgingQuery>;
+
+export interface AgingBuckets {
+  current: string;
+  days1To30: string;
+  days31To60: string;
+  days61To90: string;
+  over90: string;
+  total: string;
+}
+
+export type AgingBucketKey = Exclude<keyof AgingBuckets, 'total'>;
+
+export interface ApAgingDocument {
+  type: 'ap_invoice' | 'outgoing_payment' | 'opening_balance' | 'journal_entry';
+  id: string;
+  documentNumber: string;
+  reference: string | null;
+  postingDate: string;
+  dueDate: string;
+  days: number;
+  bucket: AgingBucketKey;
+  originalAmount: string;
+  openAmount: string;
+}
+
+export interface ApAgingVendor extends AgingBuckets {
+  vendorId: string;
+  vendorCode: string;
+  vendorName: string;
+  documents: ApAgingDocument[];
+}
+
+export interface ApAgingReport {
+  tenantName: string;
+  currency: string;
+  asOf: string;
+  basis: AgingBasis;
+  generatedAt: string;
+  accountingBasis: string;
+  vendors: ApAgingVendor[];
+  totals: AgingBuckets;
+  controlAccount: { code: string; name: string; balance: string };
+  difference: string;
+}
+
+export const arAgingQuery = z.object({
+  asOf: isoDate,
+  basis: z.enum(AGING_BASES).default('due_date'),
+  customerId: z.uuid().optional(),
+});
+export type ArAgingQuery = z.infer<typeof arAgingQuery>;
+
+export interface ArAgingDocument {
+  type: 'ar_invoice' | 'incoming_payment' | 'opening_balance' | 'journal_entry';
+  id: string;
+  documentNumber: string;
+  reference: string | null;
+  postingDate: string;
+  dueDate: string;
+  days: number;
+  bucket: AgingBucketKey;
+  originalAmount: string;
+  openAmount: string;
+}
+
+export interface ArAgingCustomer extends AgingBuckets {
+  customerId: string;
+  customerCode: string;
+  customerName: string;
+  documents: ArAgingDocument[];
+}
+
+export interface ArAgingReport {
+  tenantName: string;
+  currency: string;
+  asOf: string;
+  basis: AgingBasis;
+  generatedAt: string;
+  accountingBasis: string;
+  customers: ArAgingCustomer[];
+  totals: AgingBuckets;
+  controlAccount: { code: string; name: string; balance: string };
+  difference: string;
+}
+
+export const generalLedgerQuery = z.object({
+  from: isoDate,
+  to: isoDate,
+  accountFrom: z.string().trim().max(20).optional(),
+  accountTo: z.string().trim().max(20).optional(),
+  partnerId: z.uuid().optional(),
+});
+export type GeneralLedgerQuery = z.infer<typeof generalLedgerQuery>;
+
+export interface GeneralLedgerLine {
+  journalId: string;
+  journalNumber: string;
+  postingDate: string;
+  sourceType: string;
+  reference: string | null;
+  memo: string | null;
+  partnerCode: string | null;
+  debit: string;
+  credit: string;
+  balance: string;
+}
+
+export interface GeneralLedgerAccount {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  openingBalance: string;
+  debit: string;
+  credit: string;
+  closingBalance: string;
+  lines: GeneralLedgerLine[];
+}
+
+export interface GeneralLedgerReport {
+  tenantName: string;
+  currency: string;
+  from: string;
+  to: string;
+  generatedAt: string;
+  basis: string;
+  accounts: GeneralLedgerAccount[];
+  totals: { debit: string; credit: string };
+}
+
+export const GENERAL_LEDGER_MAX_LINES = 20000;
+
+export interface PeriodCloseCheck {
+  key: 'trial_balance' | 'receivables' | 'payables' | 'inventory';
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface PeriodCloseChecks {
+  periodId: string;
+  periodCode: string;
+  endDate: string;
+  passed: boolean;
+  checks: PeriodCloseCheck[];
 }

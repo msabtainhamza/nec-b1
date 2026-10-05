@@ -354,7 +354,7 @@ export class FinanceSetupService {
     return this.periods(principal);
   }
 
-  async changePeriodStatus(principal: TenantPrincipal, periodId: string, input: ChangePeriodStatusRequest, correlationId: string): Promise<PostingPeriod> {
+  async changePeriodStatus(principal: TenantPrincipal, periodId: string, input: ChangePeriodStatusRequest, correlationId: string, auditDetail: Record<string, unknown> = {}): Promise<PostingPeriod> {
     await this.database.withContext(this.context(principal), async (trx) => {
       const period = await trx
         .selectFrom('posting_periods')
@@ -384,7 +384,7 @@ export class FinanceSetupService {
         entityType: 'posting_period',
         entityId: periodId,
         before: { status: period.status },
-        after: { status: input.status, reason: input.reason },
+        after: { status: input.status, reason: input.reason, ...auditDetail },
         correlationId,
       });
     });

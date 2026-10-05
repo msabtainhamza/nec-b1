@@ -2,13 +2,14 @@ import { Inject, Injectable } from '@nestjs/common';
 import { jwtVerify, SignJWT } from 'jose';
 import { APP_CONFIG, type AppConfig } from '../config.js';
 
-export type TokenAudience = 'erp-app' | 'erp-platform';
+export type TokenAudience = 'erp-app' | 'erp-platform' | 'erp-support';
 
 export interface AccessClaims {
   subject: string;
   sessionId: string;
   tenantId: string | null;
   audience: TokenAudience;
+  grantId?: string;
 }
 
 const ISSUER = 'nec-erp-api';
@@ -24,7 +25,7 @@ export class TokenService {
   }
 
   async sign(claims: AccessClaims): Promise<string> {
-    const jwt = new SignJWT({ sid: claims.sessionId, ...(claims.tenantId ? { tid: claims.tenantId } : {}) })
+    const jwt = new SignJWT({ sid: claims.sessionId, ...(claims.tenantId ? { tid: claims.tenantId } : {}), ...(claims.grantId ? { gid: claims.grantId } : {}) })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(claims.subject)
       .setIssuer(ISSUER)
@@ -45,6 +46,7 @@ export class TokenService {
         sessionId: payload.sid,
         tenantId: typeof payload.tid === 'string' ? payload.tid : null,
         audience,
+        ...(typeof payload.gid === 'string' ? { grantId: payload.gid } : {}),
       };
     } catch {
       return null;

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "desktop-renderer",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@nec/desktop", "exec", "vite"],
+      "port": 5173
+    }
+  ]
+}

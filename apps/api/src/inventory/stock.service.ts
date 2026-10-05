@@ -146,27 +146,40 @@ export class StockService {
     return { onHand: parseMoney(row?.on_hand ?? '0'), totalValue: parseMoney(row?.total_value ?? '0') };
   }
 
-  async assertLatestMovement(trx: Trx, tenantId: string, itemId: string, movementId: string, itemCode: string): Promise<void> {
-    const valuation = await trx
+  async assertDocumentIsLatest(trx: Trx, tenantId: string, movements: { id: string; item_id: string }[], itemCode: (itemId: string) => string): Promise<void> {
+    const itemIds = [...new Set(movements.map((movement) => movement.item_id))];
+    if (itemIds.length === 0) return;
+    const ownIds = new Set(movements.map((movement) => movement.id));
+    const valuations = await trx
       .selectFrom('item_valuations')
-      .select('last_movement_id')
+      .select(['item_id', 'last_movement_id'])
       .where('tenant_id', '=', tenantId)
-      .where('item_id', '=', itemId)
+      .where('item_id', 'in', itemIds)
       .forUpdate()
-      .executeTakeFirst();
-    if (valuation?.last_movement_id !== movementId) {
-      throw new AppError(
-        409,
-        'VALUATION_BLOCKED',
-        `Item ${itemCode} has later stock transactions, so this document cannot be reversed automatically without recosting. Use an approved correction instead.`,
-      );
+      .execute();
+    for (const itemId of itemIds) {
+      const last = valuations.find((row) => row.item_id === itemId)?.last_movement_id;
+      if (!last || !ownIds.has(last)) {
+        throw new AppError(
+          409,
+          'VALUATION_BLOCKED',
+          `Item ${itemCode(itemId)} has later stock transactions, so this document cannot be reversed automatically without recosting. Use an approved correction instead.`,
+        );
+      }
     }
+  }
+
+  issueValue(state: { onHand: Money; totalValue: Money }, quantity: Money): Money {
+    if (quantity >= state.onHand) return state.totalValue;
+    return (2n * state.totalValue * quantity + state.onHand) / (2n * state.onHand);
   }
 
   async itemInUse(trx: Trx, tenantId: string, itemId: string): Promise<boolean> {
     const row = await sql<{ used: boolean }>`select
         exists (select 1 from stock_movements where tenant_id = ${tenantId} and item_id = ${itemId})
-        or exists (select 1 from purchase_order_lines where tenant_id = ${tenantId} and item_id = ${itemId}) as used`.execute(trx);
+        or exists (select 1 from purchase_order_lines where tenant_id = ${tenantId} and item_id = ${itemId})
+        or exists (select 1 from sales_quotation_lines where tenant_id = ${tenantId} and item_id = ${itemId})
+        or exists (select 1 from sales_order_lines where tenant_id = ${tenantId} and item_id = ${itemId}) as used`.execute(trx);
     return Boolean(row.rows[0]?.used);
   }
 
@@ -196,12 +209,16 @@ export class StockService {
         .execute();
       const onHand = parseMoney(valuation?.on_hand ?? '0');
       const onOrder = warehouses.reduce((sum, row) => sum + parseMoney(row.on_order), 0n);
+      const committedRow = await sql<{ committed: string }>`select coalesce(sum(l.quantity - l.delivered_quantity), 0)::text as committed
+        from sales_order_lines l join sales_orders o on o.id = l.order_id and o.tenant_id = l.tenant_id
+        where l.tenant_id = ${principal.tenantId} and l.item_id = ${itemId} and l.stocked and o.status = 'open'`.execute(trx);
+      const committed = parseMoney(committedRow.rows[0]?.committed ?? '0');
       return {
         itemId,
         onHand: formatMoney(onHand),
         onOrder: formatMoney(onOrder),
-        committed: formatMoney(0n),
-        available: formatMoney(onHand + onOrder),
+        committed: formatMoney(committed),
+        available: formatMoney(onHand + onOrder - committed),
         averageCost: valuation?.average_cost ?? '0.000000',
         totalValue: valuation?.total_value ?? '0.0000',
         warehouses: warehouses
@@ -224,6 +241,10 @@ export class StockService {
         .innerJoin('items as i', (join) => join.onRef('i.id', '=', 'm.item_id').onRef('i.tenant_id', '=', 'm.tenant_id'))
         .innerJoin('warehouses as w', (join) => join.onRef('w.id', '=', 'm.warehouse_id').onRef('w.tenant_id', '=', 'm.tenant_id'))
         .leftJoin('goods_receipts as gr', (join) => join.onRef('gr.id', '=', 'm.source_id').onRef('gr.tenant_id', '=', 'm.tenant_id'))
+        .leftJoin('ap_invoices as ap', (join) => join.onRef('ap.id', '=', 'm.source_id').onRef('ap.tenant_id', '=', 'm.tenant_id'))
+        .leftJoin('stock_transfers as st', (join) => join.onRef('st.id', '=', 'm.source_id').onRef('st.tenant_id', '=', 'm.tenant_id'))
+        .leftJoin('inventory_adjustments as ia', (join) => join.onRef('ia.id', '=', 'm.source_id').onRef('ia.tenant_id', '=', 'm.tenant_id'))
+        .leftJoin('deliveries as dn', (join) => join.onRef('dn.id', '=', 'm.source_id').onRef('dn.tenant_id', '=', 'm.tenant_id'))
         .where('m.tenant_id', '=', principal.tenantId);
       if (query.itemId) base = base.where('m.item_id', '=', query.itemId);
       if (query.warehouseId) base = base.where('m.warehouse_id', '=', query.warehouseId);
@@ -231,7 +252,8 @@ export class StockService {
       if (query.to) base = base.where('m.posting_date', '<=', query.to);
       const total = await base.select((eb) => eb.fn.countAll<string>().as('count')).executeTakeFirstOrThrow();
       const rows = await base
-        .select(['m.id', 'm.posting_date', 'm.created_at', 'i.code as item_code', 'i.name as item_name', 'w.code as warehouse_code', 'm.source_type', 'gr.document_number', 'm.quantity', 'm.value', 'm.unit_cost'])
+        .select(['m.id', 'm.posting_date', 'm.created_at', 'i.code as item_code', 'i.name as item_name', 'w.code as warehouse_code', 'm.source_type', 'm.quantity', 'm.value', 'm.unit_cost'])
+        .select(sql<string | null>`coalesce(gr.document_number, ap.document_number, st.document_number, ia.document_number, dn.document_number)`.as('document_number'))
         .orderBy('m.created_at', 'desc')
         .limit(query.limit)
         .offset(query.offset)

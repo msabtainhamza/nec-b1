@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "dev": "node scripts/dev.mjs",
     "start": "electron .",
-    "test": "tsc -p tsconfig.main.json && node --test \"dist/main/**/*.test.js\""
+    "test": "tsc -p tsconfig.main.json && node --test \"dist/main/**/*.test.js\"",
+    "package": "node scripts/package.mjs"
   },
   "dependencies": {
     "@nec/contracts": "workspace:*",
@@ -23,6 +24,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "typescript": "~6.0.3",
     "vite": "^8.3.1"
   }

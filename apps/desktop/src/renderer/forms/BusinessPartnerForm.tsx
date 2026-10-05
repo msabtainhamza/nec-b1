@@ -433,6 +433,13 @@ export function BusinessPartnerForm({
                 </span>
               </Row>
             ) : null}
+            {balance?.creditExposure ? <>
+              <Row label="Open Orders"><span className="form-value">{formatAmount(balance.creditExposure.openOrders)} {balance.currency}</span></Row>
+              <Row label="Uninvoiced Deliveries"><span className="form-value">{formatAmount(balance.creditExposure.uninvoicedDeliveries)} {balance.currency}</span></Row>
+              <Row label="Total Credit Exposure"><span className="form-value">{formatAmount(balance.creditExposure.total)} {balance.currency}</span></Row>
+              <Row label="Credit Limit Remaining"><span className="form-value">{formatAmount(balance.creditExposure.remaining)} {balance.currency}</span></Row>
+              <p className="ui-muted">Pending orders and deliveries exclude tax. Sales Credit Policy controls warnings and blocking.</p>
+            </> : null}
           </div>
         </div>
 

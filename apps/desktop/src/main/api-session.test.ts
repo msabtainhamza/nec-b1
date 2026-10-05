@@ -22,6 +22,12 @@ describe('renderer request allowlist', () => {
     assert.equal(isAllowedRendererRequest('GET', '/v1/fin/reports/trial-balance?from=2026-01-01&to=2026-12-31'), true);
     assert.equal(isAllowedRendererRequest('PUT', '/v1/inv/price-lists/abc/prices'), true);
     assert.equal(isAllowedRendererRequest('POST', '/v1/pur/receipts/abc/cancel'), true);
+    assert.equal(isAllowedRendererRequest('POST', '/v1/bank/outgoing-payments/abc/allocations/def/unallocate'), true);
+    assert.equal(isAllowedRendererRequest('GET', '/v1/banking/outgoing-payments'), false);
+    assert.equal(isAllowedRendererRequest('POST', '/v1/sal/quotations/abc/convert'), true);
+    assert.equal(isAllowedRendererRequest('GET', '/v1/sal/invoices/abc/document'), true);
+    assert.equal(isAllowedRendererRequest('GET', '/v1/sal/prices?postingDate=2026-04-01&itemIds=abc'), true);
+    assert.equal(isAllowedRendererRequest('GET', '/v1/sales/orders'), false);
     assert.equal(isAllowedRendererRequest('GET', 'https://example.com/v1/tenant'), false);
   });
 });
@@ -60,6 +66,29 @@ describe('api session', () => {
     assert.equal(second.status, 200);
     assert.equal(refreshCalls, 1);
     assert.ok(seen.some((line) => line.endsWith('Bearer a2')));
+  });
+
+  it('keeps the two-factor challenge in the main process and signs in after verification', async () => {
+    const sent: { url: string; body: string }[] = [];
+    const session = new ApiSession(
+      'http://api.test',
+      fakeFetch((url, init) => {
+        sent.push({ url, body: String(init.body ?? '') });
+        if (url.endsWith('/v1/auth/login')) return { status: 200, body: { mfaRequired: true, challengeToken: 'challenge-secret-token-value', challengeExpiresIn: 300 } };
+        if (url.endsWith('/v1/auth/login/mfa')) return { status: 200, body: { accessToken: 'a1', refreshToken: 'r1', accessTokenExpiresIn: 900, user: { id: 'u', email: 'e', displayName: 'd' }, tenants: [] } };
+        return { status: 200, body: { enabled: true } };
+      }),
+    );
+    assert.equal((await session.verifyMfa('123456')).status, 401);
+    const login = await session.login('e', 'p');
+    assert.deepEqual(login.body, { mfaRequired: true, expiresIn: 300 });
+    assert.equal(JSON.stringify(login.body).includes('challenge-secret'), false);
+    const verified = await session.verifyMfa('123456');
+    assert.equal(verified.ok, true);
+    assert.equal(JSON.stringify(verified.body).includes('a1'), false);
+    assert.deepEqual(JSON.parse(sent.find((entry) => entry.url.endsWith('/login/mfa'))?.body ?? '{}'), { challengeToken: 'challenge-secret-token-value', code: '123456' });
+    assert.equal((await session.mfa('status')).ok, true);
+    assert.equal((await session.verifyMfa('123456')).status, 401);
   });
 
   it('reports network failures without throwing', async () => {

@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent } from 'react';
 import type { SessionUser, TenantSummary } from '@nec/contracts';
 import { Banner, Button, FormWindow, StatusBadge } from '@nec/ui';
 import { errorMessage } from '../api';
+import { TwoFactorForm } from '../forms/TwoFactorForm';
 
 export function TenantChooser({
   user,
@@ -17,6 +18,7 @@ export function TenantChooser({
   const [selectedId, setSelectedId] = useState<string | null>(tenants[0]?.tenantId ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [twoFactor, setTwoFactor] = useState(false);
 
   const choose = async (tenantId: string | null) => {
     if (busy || !tenantId) {
@@ -60,6 +62,7 @@ export function TenantChooser({
             <Button onClick={onLogout}>Cancel</Button>
           </>
         }
+        footerRight={<Button onClick={() => setTwoFactor(true)}>Two-Factor Authentication</Button>}
       >
         <div className="dialog-product">
           <span>
@@ -103,6 +106,7 @@ export function TenantChooser({
         )}
         <p className="ui-muted">Double-click a company, or use the arrow keys and Enter.</p>
       </FormWindow>
+      {twoFactor ? <TwoFactorForm onClose={() => setTwoFactor(false)} /> : null}
     </main>
   );
 }

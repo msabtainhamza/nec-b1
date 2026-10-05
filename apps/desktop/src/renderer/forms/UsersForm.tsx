@@ -33,6 +33,7 @@ export function UsersForm({
   const [roleId, setRoleId] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<{ member: Member; roleIds: string[] } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,6 +96,27 @@ export function UsersForm({
     await load();
   };
 
+  const editRoles = (member: Member) => {
+    setError(null);
+    setNotice(null);
+    setEditing({ member, roleIds: roles.filter((role) => member.roles.includes(role.code)).map((role) => role.id) });
+  };
+
+  const saveRoles = async () => {
+    if (!editing || busy || editing.roleIds.length === 0) return;
+    setBusy(true);
+    setError(null);
+    const result = await call('PUT', `/v1/tenant/members/${editing.member.membershipId}/roles`, { roleIds: editing.roleIds, version: editing.member.version });
+    setBusy(false);
+    if (!result.ok) {
+      setError(errorMessage(result));
+      return;
+    }
+    setNotice(`Roles of ${editing.member.displayName} updated; they apply from the user's next action.`);
+    setEditing(null);
+    await load();
+  };
+
   const revoke = async (invitation: Invitation) => {
     if (!window.confirm(`Revoke the invitation for ${invitation.email}?`)) {
       return;
@@ -146,7 +168,20 @@ export function UsersForm({
           columns={[
             { key: 'name', header: 'User Name', render: (row) => row.displayName },
             { key: 'email', header: 'User ID (email)', render: (row) => row.email },
-            { key: 'roles', header: 'Roles', render: (row) => row.roles.join(', ') },
+            {
+              key: 'roles',
+              header: 'Roles',
+              render: (row) => (
+                <>
+                  {row.roles.join(', ')}{' '}
+                  {canAdminister && row.status !== 'revoked' ? (
+                    <Button type="button" variant="ghost" aria-label={`Change roles of ${row.displayName}`} onClick={() => editRoles(row)}>
+                      Change
+                    </Button>
+                  ) : null}
+                </>
+              ),
+            },
             { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
             {
               key: 'locked',
@@ -163,6 +198,36 @@ export function UsersForm({
             },
           ]}
         />
+        {editing ? (
+          <div className="reverse-panel">
+            <div className="form-section">Roles of {editing.member.displayName}</div>
+            <div className="inline-fields">
+              {roles.map((role) => (
+                <label key={role.id} className="flag-row">
+                  <input
+                    type="checkbox"
+                    checked={editing.roleIds.includes(role.id)}
+                    onChange={(e) =>
+                      setEditing((current) =>
+                        current ? { ...current, roleIds: e.target.checked ? [...current.roleIds, role.id] : current.roleIds.filter((id) => id !== role.id) } : current,
+                      )
+                    }
+                  />{' '}
+                  {role.name}
+                </label>
+              ))}
+            </div>
+            <div className="inline-fields">
+              <Button type="button" variant="primary" busy={busy} disabled={editing.roleIds.length === 0} onClick={() => void saveRoles()}>
+                Save Roles
+              </Button>
+              <Button type="button" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+            </div>
+            <p className="ui-muted">You can only assign roles whose permissions you hold, and the company must keep an active owner.</p>
+          </div>
+        ) : null}
         <div className="form-section">Pending Invitations</div>
         <DataTable
           rowNumbers

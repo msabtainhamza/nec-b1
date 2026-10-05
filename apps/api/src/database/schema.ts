@@ -64,6 +64,101 @@ export interface TenantEntitlementsTable {
   updated_at: Timestamp;
 }
 
+export interface UserMfaTable {
+  user_id: string;
+  secret_encrypted: string;
+  last_counter: ColumnType<string | null, number | string | null | undefined, number | string | null>;
+  enabled_at: NullableTimestamp;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface UserMfaRecoveryCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  code_hash: string;
+  used_at: NullableTimestamp;
+}
+
+export interface MfaChallengesTable {
+  id: Generated<string>;
+  user_id: string;
+  token_hash: string;
+  user_agent: string | null;
+  attempts: ColumnType<number, number | undefined, number>;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  used_at: NullableTimestamp;
+}
+
+export interface ApprovalTemplatesTable {
+  id: Generated<string>;
+  tenant_id: string;
+  name: string;
+  document_type: 'sales_order' | 'purchase_order';
+  min_total: Decimal;
+  approver_role_id: string;
+  required_approvals: number;
+  active: boolean;
+  version: ColumnType<number, number | undefined, number>;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ApprovalRequestsTable {
+  id: Generated<string>;
+  tenant_id: string;
+  template_id: string;
+  document_type: 'sales_order' | 'purchase_order';
+  originator_id: string;
+  partner_id: string;
+  total: Decimal;
+  payload: ColumnType<unknown, string, never>;
+  remarks: string | null;
+  status: ColumnType<'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed', 'pending' | undefined, 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'>;
+  document_id: string | null;
+  version: ColumnType<number, number | undefined, number>;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ApprovalDecisionsTable {
+  id: Generated<string>;
+  tenant_id: string;
+  request_id: string;
+  approver_id: string;
+  decision: 'approved' | 'rejected';
+  remarks: string | null;
+  decided_at: Timestamp;
+}
+
+export interface SupportGrantsTable {
+  id: Generated<string>;
+  tenant_id: string;
+  granted_by: string;
+  reason: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  revoked_at: NullableTimestamp;
+  revoked_by: string | null;
+}
+
+export interface CompanySecuritySettingsTable {
+  tenant_id: string;
+  require_admin_mfa: boolean;
+  version: number;
+  updated_at: Timestamp;
+}
+
+export interface PasswordResetTokensTable {
+  id: Generated<string>;
+  user_id: string;
+  token_hash: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  used_at: NullableTimestamp;
+}
+
 export interface UsersTable {
   id: Generated<string>;
   email: string;
@@ -632,7 +727,334 @@ export interface TaxCodeRatesTable {
   created_at: Timestamp;
 }
 
+export type PaymentDirection = 'outgoing' | 'incoming';
+
+export interface PaymentsTable {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  direction: PaymentDirection;
+  partner_id: string;
+  branch_id: string;
+  posting_date: DateColumn;
+  document_date: DateColumn;
+  payment_means: 'cash' | 'bank_transfer' | 'cheque';
+  account_id: string;
+  reference: string | null;
+  remarks: string | null;
+  currency: string;
+  amount: Decimal;
+  allocated_amount: ColumnType<string, string | undefined, string>;
+  status: ColumnType<'posted' | 'cancelled', 'posted' | 'cancelled' | undefined, 'posted' | 'cancelled'>;
+  is_cancellation: ColumnType<boolean, boolean | undefined, never>;
+  cancellation_of_id: string | null;
+  cancellation_reason: string | null;
+  journal_id: string;
+  created_by: string | null;
+  posted_at: Timestamp;
+}
+
+export interface PaymentAllocationsTable {
+  id: Generated<string>;
+  tenant_id: string;
+  event_type: 'allocate' | 'unallocate';
+  payment_id: string;
+  invoice_id: string | null;
+  opening_line_id: string | null;
+  ar_invoice_id: string | null;
+  amount: Decimal;
+  event_date: DateColumn;
+  reverses_id: string | null;
+  reason: string | null;
+  created_by: string | null;
+  created_at: Timestamp;
+}
+
+type StockDocumentStatus = ColumnType<'posted' | 'cancelled', 'posted' | 'cancelled' | undefined, 'posted' | 'cancelled'>;
+
+export interface StockTransfersTable {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  from_warehouse_id: string;
+  to_warehouse_id: string;
+  posting_date: DateColumn;
+  reason: string;
+  remarks: string | null;
+  total_value: Decimal;
+  status: StockDocumentStatus;
+  is_cancellation: ColumnType<boolean, boolean | undefined, never>;
+  cancellation_of_id: string | null;
+  cancellation_reason: string | null;
+  journal_id: string | null;
+  created_by: string | null;
+  posted_at: Timestamp;
+}
+
+export interface StockTransferLinesTable {
+  id: Generated<string>;
+  tenant_id: string;
+  transfer_id: string;
+  line_no: number;
+  item_id: string;
+  quantity: Decimal;
+  value: Decimal;
+}
+
+export interface InventoryAdjustmentsTable {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  direction: 'receipt' | 'issue' | 'opening';
+  posting_date: DateColumn;
+  offset_account_id: string;
+  reason: string;
+  remarks: string | null;
+  total_value: Decimal;
+  status: StockDocumentStatus;
+  is_cancellation: ColumnType<boolean, boolean | undefined, never>;
+  cancellation_of_id: string | null;
+  cancellation_reason: string | null;
+  journal_id: string | null;
+  created_by: string | null;
+  posted_at: Timestamp;
+}
+
+export interface InventoryAdjustmentLinesTable {
+  id: Generated<string>;
+  tenant_id: string;
+  adjustment_id: string;
+  line_no: number;
+  item_id: string;
+  warehouse_id: string;
+  inventory_account_id: string;
+  quantity: Decimal;
+  unit_cost: Decimal;
+  value: Decimal;
+}
+
+export interface OpeningBalancesTable {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  kind: 'account' | 'partner';
+  posting_date: DateColumn;
+  offset_account_id: string;
+  reason: string;
+  remarks: string | null;
+  total_debit: Decimal;
+  total_credit: Decimal;
+  status: StockDocumentStatus;
+  is_cancellation: ColumnType<boolean, boolean | undefined, never>;
+  cancellation_of_id: string | null;
+  cancellation_reason: string | null;
+  journal_id: string;
+  created_by: string | null;
+  posted_at: Timestamp;
+}
+
+export interface OpeningBalanceLinesTable {
+  id: Generated<string>;
+  tenant_id: string;
+  opening_balance_id: string;
+  line_no: number;
+  account_id: string | null;
+  partner_id: string | null;
+  reference: string | null;
+  document_date: ColumnType<string | null, string | null | undefined, string | null>;
+  due_date: ColumnType<string | null, string | null | undefined, string | null>;
+  debit: Decimal;
+  credit: Decimal;
+  paid_amount: ColumnType<string, string | undefined, string>;
+}
+
+type OrderStatus = ColumnType<'open' | 'closed' | 'cancelled', 'open' | 'closed' | 'cancelled' | undefined, 'open' | 'closed' | 'cancelled'>;
+
+export interface SalesOrdersTable {
+  quotation_id: string | null;
+  id: Generated<string>;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  customer_id: string;
+  branch_id: string;
+  posting_date: DateColumn;
+  delivery_date: DateColumn;
+  customer_reference: string | null;
+  remarks: string | null;
+  currency: string;
+  total: Decimal;
+  status: OrderStatus;
+  closed_reason: 'fulfilled' | 'manual' | null;
+  price_list_id: string | null;
+  payment_terms_id: string | null;
+  bill_to: ColumnType<unknown | null, string | null | undefined, never>;
+  ship_to: ColumnType<unknown | null, string | null | undefined, never>;
+  created_by: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  version: ColumnType<number, number | undefined, number>;
+}
+
+export interface SalesOrderLinesTable {
+  quotation_line_id: string | null;
+  id: Generated<string>;
+  tenant_id: string;
+  order_id: string;
+  line_no: number;
+  item_id: string;
+  description: string;
+  uom_id: string;
+  stocked: boolean;
+  warehouse_id: string | null;
+  quantity: Decimal;
+  delivered_quantity: ColumnType<string, string | undefined, string>;
+  invoiced_quantity: ColumnType<string, string | undefined, string>;
+  unit_price: Decimal;
+  discount_percent: Decimal;
+  net_price: Decimal;
+  line_total: Decimal;
+}
+
+export interface SalesQuotationsTable extends Omit<SalesOrdersTable, 'quotation_id' | 'delivery_date' | 'status' | 'closed_reason'> {
+  valid_until: DateColumn;
+  status: ColumnType<'draft' | 'issued' | 'closed' | 'cancelled', 'draft' | undefined, 'draft' | 'issued' | 'closed' | 'cancelled'>;
+}
+
+export interface SalesQuotationLinesTable extends Omit<SalesOrderLinesTable, 'quotation_line_id' | 'order_id' | 'delivered_quantity' | 'invoiced_quantity'> {
+  quotation_id: string;
+}
+
+export interface DeliveriesTable {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  order_id: string;
+  customer_id: string;
+  branch_id: string;
+  posting_date: DateColumn;
+  remarks: string | null;
+  currency: string;
+  total: Decimal;
+  cost_total: Decimal;
+  status: StockDocumentStatus;
+  is_cancellation: ColumnType<boolean, boolean | undefined, never>;
+  cancellation_of_id: string | null;
+  cancellation_reason: string | null;
+  journal_id: string | null;
+  created_by: string | null;
+  posted_at: Timestamp;
+}
+
+export interface DeliveryLinesTable {
+  id: Generated<string>;
+  tenant_id: string;
+  delivery_id: string;
+  line_no: number;
+  order_line_id: string;
+  item_id: string;
+  warehouse_id: string;
+  quantity: Decimal;
+  net_price: Decimal;
+  line_total: Decimal;
+  cost_value: Decimal;
+  invoiced_quantity: ColumnType<string, string | undefined, string>;
+}
+
+export interface ArInvoicesTable {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  number: ColumnType<string, number | string, never>;
+  document_number: string;
+  customer_id: string;
+  branch_id: string;
+  posting_date: DateColumn;
+  document_date: DateColumn;
+  due_date: DateColumn;
+  customer_reference: string | null;
+  remarks: string | null;
+  currency: string;
+  subtotal: Decimal;
+  tax_total: Decimal;
+  total: Decimal;
+  paid_amount: ColumnType<string, string | undefined, string>;
+  status: StockDocumentStatus;
+  is_cancellation: ColumnType<boolean, boolean | undefined, never>;
+  cancellation_of_id: string | null;
+  cancellation_reason: string | null;
+  journal_id: string | null;
+  price_override: ColumnType<boolean, boolean | undefined, never>;
+  print_snapshot: ColumnType<unknown | null, string | null | undefined, never>;
+  payment_terms_id: string | null;
+  created_by: string | null;
+  posted_at: Timestamp;
+}
+
+export interface ArInvoiceLinesTable {
+  id: Generated<string>;
+  tenant_id: string;
+  invoice_id: string;
+  line_no: number;
+  line_kind: 'delivery' | 'order';
+  delivery_id: string | null;
+  delivery_line_id: string | null;
+  order_line_id: string;
+  item_id: string;
+  description: string;
+  quantity: Decimal;
+  unit_price: Decimal;
+  source_price: Decimal;
+  line_total: Decimal;
+  revenue_account_id: string;
+  tax_code_id: string | null;
+  tax_rate: Decimal;
+  tax_amount: Decimal;
+}
+
+export interface CompanyProfilesTable {
+  tenant_id: string;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+  country: string | null;
+  tax_number: string | null;
+  phone: string | null;
+  email: string | null;
+  invoice_footer: string | null;
+  version: number;
+  updated_at: Timestamp;
+}
+
+export interface SalesSettingsTable {
+  tenant_id: string;
+  price_tolerance_percent: string | null;
+  version: number;
+  updated_at: Timestamp;
+}
+
+export interface SalesCreditSettingsTable {
+  tenant_id: string;
+  mode: 'disabled' | 'warn' | 'block';
+  version: number;
+}
+
 export interface Database {
+  sales_credit_settings: SalesCreditSettingsTable;
+  sales_settings: SalesSettingsTable;
+  company_profiles: CompanyProfilesTable;
   plans: PlansTable;
   platform_operators: PlatformOperatorsTable;
   tenants: TenantsTable;
@@ -641,6 +1063,15 @@ export interface Database {
   users: UsersTable;
   sessions: SessionsTable;
   refresh_tokens: RefreshTokensTable;
+  password_reset_tokens: PasswordResetTokensTable;
+  user_mfa: UserMfaTable;
+  user_mfa_recovery_codes: UserMfaRecoveryCodesTable;
+  mfa_challenges: MfaChallengesTable;
+  company_security_settings: CompanySecuritySettingsTable;
+  support_grants: SupportGrantsTable;
+  approval_templates: ApprovalTemplatesTable;
+  approval_requests: ApprovalRequestsTable;
+  approval_decisions: ApprovalDecisionsTable;
   platform_audit_events: PlatformAuditEventsTable;
   memberships: MembershipsTable;
   roles: RolesTable;
@@ -680,4 +1111,20 @@ export interface Database {
   ap_invoice_lines: ApInvoiceLinesTable;
   tax_codes: TaxCodesTable;
   tax_code_rates: TaxCodeRatesTable;
+  payments: PaymentsTable;
+  payment_allocations: PaymentAllocationsTable;
+  stock_transfers: StockTransfersTable;
+  stock_transfer_lines: StockTransferLinesTable;
+  inventory_adjustments: InventoryAdjustmentsTable;
+  inventory_adjustment_lines: InventoryAdjustmentLinesTable;
+  opening_balances: OpeningBalancesTable;
+  opening_balance_lines: OpeningBalanceLinesTable;
+  sales_quotations: SalesQuotationsTable;
+  sales_quotation_lines: SalesQuotationLinesTable;
+  sales_orders: SalesOrdersTable;
+  sales_order_lines: SalesOrderLinesTable;
+  deliveries: DeliveriesTable;
+  delivery_lines: DeliveryLinesTable;
+  ar_invoices: ArInvoicesTable;
+  ar_invoice_lines: ArInvoiceLinesTable;
 }

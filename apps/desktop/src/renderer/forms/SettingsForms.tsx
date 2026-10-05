@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type { PurchasingSettings, TaxCode } from '@nec/contracts';
+import type { PurchasingSettings, SalesSettings, TaxCode } from '@nec/contracts';
 import { Banner, Button, DataTable, FormWindow, StatusBadge } from '@nec/ui';
 import { errorMessage } from '../api';
 import type { ApiCall } from '../screens/Shell';
@@ -173,9 +173,23 @@ export function TaxCodesForm({ call, canAdminister, onClose }: { call: ApiCall; 
   );
 }
 
-export function DocumentSettingsForm({ call, canAdminister, onClose }: { call: ApiCall; canAdminister: boolean; onClose: () => void }) {
+export function DocumentSettingsForm({
+  call,
+  canAdminister,
+  canViewSales,
+  canAdministerSales,
+  onClose,
+}: {
+  call: ApiCall;
+  canAdminister: boolean;
+  canViewSales: boolean;
+  canAdministerSales: boolean;
+  onClose: () => void;
+}) {
   const [settings, setSettings] = useState<PurchasingSettings | null>(null);
   const [tolerance, setTolerance] = useState('');
+  const [salesSettings, setSalesSettings] = useState<SalesSettings | null>(null);
+  const [salesTolerance, setSalesTolerance] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -189,21 +203,46 @@ export function DocumentSettingsForm({ call, canAdminister, onClose }: { call: A
         setError(errorMessage(result));
       }
     });
-  }, [call]);
+    if (canViewSales) {
+      void call<SalesSettings>('GET', '/v1/sal/settings').then((result) => {
+        if (result.ok) {
+          setSalesSettings(result.body);
+          setSalesTolerance(result.body.priceTolerancePercent === null ? '' : trim(result.body.priceTolerancePercent));
+        } else {
+          setError(errorMessage(result));
+        }
+      });
+    }
+  }, [call, canViewSales]);
 
-  const dirty = settings !== null && tolerance !== trim(settings.priceTolerancePercent);
+  const purchasingDirty = settings !== null && tolerance !== trim(settings.priceTolerancePercent);
+  const salesDirty = salesSettings !== null && salesTolerance.trim() !== (salesSettings.priceTolerancePercent === null ? '' : trim(salesSettings.priceTolerancePercent));
+  const dirty = purchasingDirty || salesDirty;
 
   const save = async () => {
-    if (!settings || busy) return;
+    if (busy) return;
     setBusy(true);
     setError(null);
-    const result = await call<PurchasingSettings>('PUT', '/v1/pur/settings', { priceTolerancePercent: tolerance || '0', version: settings.version });
-    setBusy(false);
-    if (!result.ok) {
-      setError(errorMessage(result));
-      return;
+    if (purchasingDirty && settings) {
+      const result = await call<PurchasingSettings>('PUT', '/v1/pur/settings', { priceTolerancePercent: tolerance || '0', version: settings.version });
+      if (!result.ok) {
+        setBusy(false);
+        setError(errorMessage(result));
+        return;
+      }
+      setSettings(result.body);
     }
-    setSettings(result.body);
+    if (salesDirty && salesSettings) {
+      const result = await call<SalesSettings>('PUT', '/v1/sal/settings', { priceTolerancePercent: salesTolerance.trim() || null, version: salesSettings.version });
+      if (!result.ok) {
+        setBusy(false);
+        setError(errorMessage(result));
+        return;
+      }
+      setSalesSettings(result.body);
+      setSalesTolerance(result.body.priceTolerancePercent === null ? '' : trim(result.body.priceTolerancePercent));
+    }
+    setBusy(false);
     setNotice('Operation completed successfully.');
   };
 
@@ -239,6 +278,26 @@ export function DocumentSettingsForm({ call, canAdminister, onClose }: { call: A
       <p className="ui-muted">
         An A/P invoice price may differ from its goods receipt price by up to this percentage. Larger differences need a user with the price override permission; each override is audited.
       </p>
+      {salesSettings ? (
+        <>
+          <div className="form-section">Sales</div>
+          <label className="ui-field">
+            <span>Price tolerance %</span>
+            <input
+              className="grid-input grid-input--number"
+              inputMode="decimal"
+              aria-label="Sales price tolerance %"
+              placeholder="No check"
+              value={salesTolerance}
+              readOnly={!canAdministerSales}
+              onChange={(e) => setSalesTolerance(e.target.value)}
+            />
+          </label>
+          <p className="ui-muted">
+            Leave blank to allow A/R invoice prices to be changed freely, as in the default Business One-style setup. When set, an A/R invoice price may differ from its sales order or delivery price by up to this percentage; larger differences need a user with the sales price override permission and each override is audited.
+          </p>
+        </>
+      ) : null}
     </FormWindow>
   );
 }
