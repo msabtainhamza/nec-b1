@@ -1,0 +1,14 @@
+[Unit]
+Description=NEC ERP API
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nec-b1/apps/api
+ExecStart=/usr/bin/node --env-file=/home/ubuntu/nec-b1/.env dist/src/main.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

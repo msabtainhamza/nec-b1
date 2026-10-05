@@ -8,3 +8,5 @@ coverage/
 !.env.example
 *.tsbuildinfo
 .DS_Store
+
+/apps/desktop/release/

@@ -1,6 +1,6 @@
 # Implementation status
 
-**Updated:** 1 October 2026 (Codex database readiness follow-up)
+**Updated:** 5 October 2026 (Claude dev deployment and Windows installer, ADR-054)
 **Current milestone:** M4 Sales (M1, M2 and M5 partially complete; see table)
 **Project state:** Foundation, business partners, inventory master data, financials core, purchasing (PO, goods receipt, A/P invoice with tax and revaluation), stock ledger, outgoing payments with allocation, stock transfers and adjustments, A/P aging, G/L, business partner and inventory opening balances with CSV import, incoming payments, customer aging and the sales flow (quotations, orders, deliveries, A/R invoices) implemented and tested. Initial commit `5d47008` on `master`; the outgoing-payments, stock-transaction, A/P aging, opening-balance, incoming-payment/import, customer aging, sales, quotation and credit-policy slices are uncommitted.
 
@@ -54,6 +54,13 @@ See the latest session entry below for exact commands and results.
 - **Exact next action:** As in "Next action" above.
 
 ## Latest session update
+
+### 2026-10-05 - Claude dev deployment on EC2 and Windows installer (ADR-054)
+- Completed: `apps/desktop/scripts/package.mjs` and `package` script build an NSIS installer with electron-builder 26.15.3 (new dev dependency); the HTTPS API URL from `NEC_API_URL` is baked into `app-config.json`; `NEC_INSTALLER_OUT` overrides the output folder. `main.ts` reads the bundled URL after the environment variable. Added `infrastructure/dev-server/` (Caddyfile, `nec-api.service`, `nec-worker.service`) and `docs/DEPLOY_DEV.md` with step-by-step EC2 setup. `apps/desktop/release/` is git-ignored.
+- Changed files: `apps/desktop/src/main/main.ts`, `apps/desktop/package.json`, `apps/desktop/scripts/package.mjs`, `pnpm-lock.yaml`, `.gitignore`, `infrastructure/dev-server/*`, `docs/DEPLOY_DEV.md`, `docs/DECISIONS.md`, this file.
+- Verification: `NEC_API_URL=https://erp-dev.example.com` package build produced `NEC-ERP-Setup-0.1.0.exe` (about 111 MB) when output went outside the repository; `app.asar` lists only `app-config.json`, `package.json` and `dist/{main,preload,renderer}` without tests or maps; `app-config.json` holds the URL; the unpacked `NEC ERP.exe` started and opened a window titled NEC ERP (first packaged Electron launch; no API was reachable, so sign-in was not exercised). Desktop typecheck passed, desktop tests 8/8, `pnpm lint` exit 0. Building into `apps/desktop/release/installer` failed with EBUSY on `default_app.asar` because another process on this machine held the file; a stale `release/installer/win-unpacked.tmp` folder may remain. The EC2 steps in `docs/DEPLOY_DEV.md` were not executed.
+- Blockers: most work since `5d47008` is still uncommitted, so a server clone would get only the initial commit until it is committed and pushed. Installer is unsigned; no auto-update or icon.
+- Next action: commit and push, then follow `docs/DEPLOY_DEV.md` on an EC2 instance and sign in from the installed app against the HTTPS dev API.
 
 ### 2026-10-01 - Claude approval procedures (ADR-053)
 

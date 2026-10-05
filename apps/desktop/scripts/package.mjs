@@ -28,7 +28,8 @@ const require = createRequire(join(desktopDir, 'package.json'));
 const electronVersion = JSON.parse(readFileSync(require.resolve('electron/package.json'), 'utf8')).version;
 
 const stageDir = join(desktopDir, 'release', 'app');
-rmSync(join(desktopDir, 'release'), { recursive: true, force: true });
+const outputDir = process.env.NEC_INSTALLER_OUT ?? join(desktopDir, 'release', 'installer');
+rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 
 const copyDist = (folder) =>
@@ -62,8 +63,8 @@ const builderConfig = {
   appId: 'com.nec.erp.desktop',
   productName: 'NEC ERP',
   electronVersion,
-  directories: { app: stageDir, output: join(desktopDir, 'release', 'installer') },
-  files: ['**/*'],
+  directories: { app: stageDir, output: outputDir },
+  files: ['**/*', '!node_modules{,/**/*}'],
   npmRebuild: false,
   win: { target: [{ target: 'nsis', arch: ['x64'] }], signAndEditExecutable: false },
   nsis: {
@@ -77,4 +78,4 @@ const configPath = join(desktopDir, 'release', 'electron-builder.json');
 writeFileSync(configPath, JSON.stringify(builderConfig, null, 2));
 
 run(`pnpm exec electron-builder --win --config "${configPath}" --publish never`);
-console.log(`Installer written to ${join(desktopDir, 'release', 'installer')} with API ${parsed.origin}`);
+console.log(`Installer written to ${outputDir} with API ${parsed.origin}`);
